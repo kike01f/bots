@@ -2314,6 +2314,9 @@ const ARTURITO_GADGET_KB_SEED = [
       this.tickets = tickets;
       this.knowledge = knowledge;
       this._unsubs = [];
+      this._ticketsUnsub = null;
+      this._liveDb = null;
+      this._liveOnUpdate = null;
       this._pushing = false;
       this._syncing = false;
     }
@@ -2356,6 +2359,10 @@ const ARTURITO_GADGET_KB_SEED = [
     }
 
     applyUnifiedKnowledge(database) {
+      if (typeof global.KnowledgeBaseModule !== 'undefined' && global.KnowledgeBaseModule.syncFromGadget) {
+        global.KnowledgeBaseModule.syncFromGadget();
+        return;
+      }
       const manual = database.manualKnowledge || [];
       const synced = (database.gadgetKB || [])
         .filter((e) => e.enabled !== false)
@@ -2380,6 +2387,26 @@ const ARTURITO_GADGET_KB_SEED = [
           };
         });
       database.knowledge = manual.concat(synced).sort((a, b) => (a.order ?? 9999) - (b.order ?? 9999));
+    }
+
+    async syncCollectionReplace(collection, items, mapFn, idFn) {
+      if (!this.fb.isEnabled()) return;
+      const { getDocs, writeBatch, doc } = this.fb._modules;
+      const cid = this._cid();
+      const list = items || [];
+      const snap = await getDocs(this.fb.col(collection));
+      const keepIds = new Set(list.map((item, i) => idFn(item, i)));
+      const toDelete = snap.docs.filter((d) => !keepIds.has(d.id));
+      for (let i = 0; i < toDelete.length; i += 400) {
+        const batch = writeBatch(this.fb.db);
+        toDelete.slice(i, i + 400).forEach((d) => {
+          batch.delete(doc(this.fb.db, `condominios/${cid}/${collection}`, d.id));
+        });
+        await batch.commit();
+      }
+      if (list.length) {
+        await this.batchWrite(collection, list, mapFn, idFn);
+      }
     }
 
     async batchWrite(collection, items, mapFn, idFn) {
@@ -2432,14 +2459,22 @@ const ARTURITO_GADGET_KB_SEED = [
     }
 
     async pushGadgetKB(entries) {
-      if (!entries?.length) return;
-      await this.batchWrite('gadget_kb', entries, (e) => ({ ...e, updatedAt: Date.now() }), (e) => e.id || e.key);
+      await this.syncCollectionReplace(
+        'gadget_kb',
+        entries || [],
+        (e) => ({ ...e, updatedAt: Date.now() }),
+        (e) => e.id || e.key
+      );
     }
 
     async pushManualKnowledge(knowledgeArr) {
       const manual = (knowledgeArr || []).filter((k) => k.origin !== 'gadget');
-      if (!manual.length) return;
-      await this.batchWrite('knowledge_base', manual, (k) => this.mapManualToCloud(k), (k) => k.id);
+      await this.syncCollectionReplace(
+        'knowledge_base',
+        manual,
+        (k) => this.mapManualToCloud(k),
+        (k) => k.id
+      );
     }
 
     async migrateTrainingDocuments(documents) {
@@ -2474,18 +2509,47 @@ const ARTURITO_GADGET_KB_SEED = [
       return { ok: true };
     }
 
+    _snapErr(label) {
+      return (err) => {
+        if (err?.code === 'permission-denied') {
+          console.warn('[CloudSync]', label, 'sin permiso');
+          return;
+        }
+        console.warn('[CloudSync]', label, err);
+      };
+    }
+
+    stopTicketsWatch() {
+      if (this._ticketsUnsub) {
+        try { this._ticketsUnsub(); } catch (_) {}
+        this._ticketsUnsub = null;
+      }
+    }
+
+    bindTicketsWatch(database, onUpdate) {
+      this.stopTicketsWatch();
+      if (!this.fb.isEnabled() || !this.fb.auth?.currentUser) return;
+
+      const { onSnapshot } = this.fb._modules;
+      this._ticketsUnsub = onSnapshot(
+        this.fb.col('tickets'),
+        (snap) => {
+          database.tickets = snap.docs.map((d) => this.tickets.mapToLocal(d.data(), d.id));
+          this._cacheLocal(database);
+          if (onUpdate) onUpdate('tickets');
+        },
+        this._snapErr('tickets')
+      );
+    }
+
     startRealtimeSync(database, onUpdate) {
       this.stop();
       if (!this.fb.isEnabled()) return;
 
-      const { onSnapshot } = this.fb._modules;
+      this._liveDb = database;
+      this._liveOnUpdate = onUpdate;
 
-      const unsubTickets = this.tickets.watchTickets((tickets) => {
-        database.tickets = tickets;
-        this._cacheLocal(database);
-        if (onUpdate) onUpdate('tickets');
-      });
-      this._unsubs.push(unsubTickets);
+      const { onSnapshot } = this.fb._modules;
 
       const settingsUnsub = onSnapshot(
         this.fb.doc(`condominios/${this._cid()}/settings/main`),
@@ -2495,43 +2559,56 @@ const ARTURITO_GADGET_KB_SEED = [
             this._cacheLocal(database);
             if (onUpdate) onUpdate('settings');
           }
-        }
+        },
+        this._snapErr('settings')
       );
       this._unsubs.push(settingsUnsub);
 
-      const gadgetUnsub = onSnapshot(this.fb.col('gadget_kb'), (snap) => {
-        if (this._pushing) return;
-        this._syncing = true;
-        database.gadgetKB = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        this.applyUnifiedKnowledge(database);
-        this._cacheLocal(database);
-        this._syncing = false;
-        if (onUpdate) onUpdate('gadgetKB');
-      });
+      const gadgetUnsub = onSnapshot(
+        this.fb.col('gadget_kb'),
+        (snap) => {
+          if (this._pushing) return;
+          this._syncing = true;
+          database.gadgetKB = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          this.applyUnifiedKnowledge(database);
+          this._cacheLocal(database);
+          this._syncing = false;
+          if (onUpdate) onUpdate('gadgetKB');
+        },
+        this._snapErr('gadget_kb')
+      );
       this._unsubs.push(gadgetUnsub);
 
-      const manualUnsub = onSnapshot(this.fb.col('knowledge_base'), (snap) => {
-        if (this._pushing) return;
-        this._syncing = true;
-        database.manualKnowledge = snap.docs.map((d) => this.mapManualFromCloud(d.id, d.data()));
-        this.applyUnifiedKnowledge(database);
-        this._cacheLocal(database);
-        this._syncing = false;
-        if (onUpdate) onUpdate('knowledge');
-      });
+      const manualUnsub = onSnapshot(
+        this.fb.col('knowledge_base'),
+        (snap) => {
+          if (this._pushing) return;
+          this._syncing = true;
+          database.manualKnowledge = snap.docs.map((d) => this.mapManualFromCloud(d.id, d.data()));
+          this.applyUnifiedKnowledge(database);
+          this._cacheLocal(database);
+          this._syncing = false;
+          if (onUpdate) onUpdate('knowledge');
+        },
+        this._snapErr('knowledge_base')
+      );
       this._unsubs.push(manualUnsub);
+
+      this.bindTicketsWatch(database, onUpdate);
     }
 
     _cacheLocal(database) {
-      if (this._syncing) return;
       try {
         localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
       } catch (_) {}
     }
 
     stop() {
+      this.stopTicketsWatch();
       this._unsubs.forEach((fn) => { try { fn(); } catch (_) {} });
       this._unsubs = [];
+      this._liveDb = null;
+      this._liveOnUpdate = null;
     }
   }
 
@@ -2552,9 +2629,15 @@ const ARTURITO_GADGET_KB_SEED = [
         database.manualKnowledge = (database.knowledge || []).filter((k) => k.origin !== 'gadget');
       }
       localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
-      if (!this.fb.isEnabled() || this.sync._syncing) return;
+      if (!this.fb.isEnabled() || this.sync._syncing) {
+        return { local: true, cloud: false, reason: 'offline_or_syncing' };
+      }
+      if (!this.fb.auth?.currentUser) {
+        return { local: true, cloud: false, reason: 'auth_required' };
+      }
 
       this.sync._pushing = true;
+      let cloudOk = true;
       try {
         if (scope === 'full' || scope === 'settings') {
           await this.sync.syncSettings(database.settings);
@@ -2566,10 +2649,13 @@ const ARTURITO_GADGET_KB_SEED = [
           await this.sync.pushManualKnowledge(database.manualKnowledge || []);
         }
       } catch (err) {
+        cloudOk = false;
         console.warn('[DataStore] persist cloud:', err);
+        global.toast?.('Guardado local OK. Error al respaldar en nube: ' + (err.message || err), 'error');
       } finally {
         this.sync._pushing = false;
       }
+      return { local: true, cloud: cloudOk };
     }
 
     /** Al conectar: sube local vacío en nube, o baja nube si local está vacío */
@@ -2604,13 +2690,7 @@ const ARTURITO_GADGET_KB_SEED = [
       this.sync.applyUnifiedKnowledge(database);
       localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
 
-      this.sync.startRealtimeSync(database, async (type) => {
-        if (type === 'gadgetKB' || type === 'knowledge') {
-          this.sync.applyUnifiedKnowledge(database);
-          if (typeof global.RAGModule !== 'undefined') {
-            await global.RAGModule.rebuildIndex();
-          }
-        }
+      this.sync.startRealtimeSync(database, (type) => {
         if (callbacks.onSync) callbacks.onSync(type);
       });
 
@@ -2739,7 +2819,12 @@ const ARTURITO_GADGET_KB_SEED = [
         return false;
       }
       try {
-        await auth.init(options.onAuthChange);
+        await auth.init(async (user) => {
+          if (options.onAuthChange) options.onAuthChange(user);
+          if (options.database) {
+            sync.bindTicketsWatch(options.database, sync._liveOnUpdate);
+          }
+        });
         if (options.database) {
           await store.bootstrap(options.database, { onSync: options.onSync });
         }
@@ -3575,12 +3660,19 @@ const DatabaseModule = {
     if (typeof KnowledgeBaseModule !== 'undefined') KnowledgeBaseModule.syncFromGadget();
   },
   /** Persiste local + nube (UnifiedDataStore) */
-  save(scope = 'full') {
+  async save(scope = 'full') {
     if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.store) {
-      ArturitoCloud.store.persist(database, scope);
-    } else {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(database));
+      const result = await ArturitoCloud.store.persist(database, scope);
+      if (result?.reason === 'auth_required' && typeof App !== 'undefined' && App.mode === 'admin') {
+        if (!DatabaseModule._authWarned) {
+          DatabaseModule._authWarned = true;
+          toast('Cambios guardados localmente. Inicia sesión con Firebase para respaldar en la nube.', 'warning');
+        }
+      }
+      return result;
     }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(database));
+    return { local: true, cloud: false };
   },
   /** Genera ID único */
   uid(prefix = 'id') { return prefix + '_' + Date.now() + '_' + Math.random().toString(36).substr(2,5); },
@@ -4687,17 +4779,19 @@ const GadgetKBModule = {
         createdAt: Date.now()
       });
     }
-    DatabaseModule.save('gadgetKB');
     KnowledgeBaseModule.syncFromGadget();
+    const r = await DatabaseModule.save('gadgetKB');
+    if (r?.cloud) toast('Tema Gadget respaldado en la nube', 'success');
     await RAGModule.rebuildIndex();
     return payload;
   },
 
   async deleteEntry(id) {
     database.gadgetKB = (database.gadgetKB || []).filter(e => e.id !== id);
-    DatabaseModule.save('gadgetKB');
     KnowledgeBaseModule.syncFromGadget();
+    const r = await DatabaseModule.save('gadgetKB');
     await RAGModule.rebuildIndex();
+    return r;
   },
 
   resetToSeed() {
@@ -5050,6 +5144,8 @@ const AuthModule = {
       try {
         const user = await ArturitoCloud.auth.login(email, pass);
         this.currentUser = user;
+        DatabaseModule._authWarned = false;
+        await DatabaseModule.save('full');
         this.hideLogin();
         App.setMode('admin');
         toast('Bienvenido, ' + user.nombre, 'success');
@@ -6754,19 +6850,41 @@ const TrainingModule = {
       database.manualKnowledge = (database.knowledge || []).filter((k) => k.origin !== 'gadget');
     }
     if (editId) {
+      const kView = database.knowledge.find(x => x.id === editId);
+      if (kView?.origin === 'gadget' && kView.gadgetId) {
+        const gIdx = database.gadgetKB.findIndex(g => g.id === kView.gadgetId);
+        if (gIdx >= 0) {
+          const catKey = Object.entries(GadgetKBModule.getCategories()).find(([, v]) => v.name === data.categoria)?.[0];
+          database.gadgetKB[gIdx] = {
+            ...database.gadgetKB[gIdx],
+            title: data.pregunta,
+            response: data.respuesta,
+            keywords: String(data.keywords || '').split(',').map(k => k.trim()).filter(Boolean),
+            category: catKey || database.gadgetKB[gIdx].category,
+            updatedAt: Date.now()
+          };
+        }
+        KnowledgeBaseModule.syncFromGadget();
+        DatabaseModule.save('gadgetKB').then(() => {
+          closeModal('modalKnowledge'); this.renderManual(); this.renderGadgetKB(); this.renderStats();
+          RAGModule.rebuildIndex();
+          toast('Tema actualizado y respaldado en la nube', 'success');
+        });
+        return;
+      }
       const idx = database.manualKnowledge.findIndex(k => k.id === editId);
       if (idx >= 0) {
-        const entry = { ...database.manualKnowledge[idx], ...data };
-        database.manualKnowledge[idx] = entry;
-        if (entry.origin === 'gadget') KnowledgeBaseModule.pushManualToGadget(entry, data);
+        database.manualKnowledge[idx] = { ...database.manualKnowledge[idx], ...data };
       }
     } else {
       database.manualKnowledge.unshift({ id: DatabaseModule.uid('k'), origin: 'manual', ...data, createdAt: Date.now() });
     }
     KnowledgeBaseModule.syncFromGadget();
-    DatabaseModule.save('knowledge'); closeModal('modalKnowledge'); this.renderManual(); this.renderStats();
-    RAGModule.rebuildIndex();
-    toast('Base manual guardada — Arturito ya puede usarla', 'success');
+    DatabaseModule.save('knowledge').then(() => {
+      closeModal('modalKnowledge'); this.renderManual(); this.renderStats();
+      RAGModule.rebuildIndex();
+      toast('Base manual guardada — Arturito ya puede usarla', 'success');
+    });
   },
   removeManual(id) {
     const entry = (database.manualKnowledge || database.knowledge).find(k => k.id === id);
@@ -6779,9 +6897,11 @@ const TrainingModule = {
     }
     database.manualKnowledge = (database.manualKnowledge || database.knowledge.filter(k => k.origin !== 'gadget')).filter(k => k.id !== id);
     KnowledgeBaseModule.syncFromGadget();
-    DatabaseModule.save('knowledge'); this.renderManual(); this.renderGadgetKB(); this.renderStats();
-    RAGModule.rebuildIndex();
-    toast('Entrada eliminada', 'info');
+    DatabaseModule.save('knowledge').then(() => {
+      this.renderManual(); this.renderGadgetKB(); this.renderStats();
+      RAGModule.rebuildIndex();
+      toast('Entrada eliminada', 'info');
+    });
   },
   exportManual() {
     KnowledgeBaseModule.syncFromGadget();
@@ -7141,6 +7261,30 @@ function registerArturitoServiceWorker() {
 /* ─── App — Orquestador principal ─── */
 const App = {
   mode: 'client',
+  /** Aplica cambios recibidos en tiempo real desde Firestore */
+  async applyCloudUpdate(type) {
+    if (type === 'settings' || type === 'gadgetKB' || type === 'knowledge') {
+      SettingsModule.apply();
+      ChatModule.renderQuickQuestions();
+      ChatModule.renderChatShortcuts();
+    }
+    if (type === 'gadgetKB' || type === 'knowledge') {
+      KnowledgeBaseModule.syncFromGadget();
+      await RAGModule.rebuildIndex();
+      if (this.mode === 'admin') {
+        TrainingModule.renderGadgetKB?.();
+        TrainingModule.renderManual?.();
+        TrainingModule.renderStats?.();
+      }
+    }
+    if (this.mode === 'admin') {
+      if (type === 'tickets') {
+        TicketModule.render();
+        ReportModule.render();
+      }
+      AdminModule.render();
+    }
+  },
   /** Cambia entre vista residente y panel admin */
   setMode(mode) {
     this.mode = mode;
@@ -7179,16 +7323,10 @@ const App = {
     hydrateIcons();
     wrapSearchBoxes();
 
+    global.KnowledgeBaseModule = KnowledgeBaseModule;
+
     const cloudHandlers = {
-      onSync: async (type) => {
-        if (type === 'gadgetKB' || type === 'knowledge') {
-          KnowledgeBaseModule.syncFromGadget();
-          await RAGModule.rebuildIndex();
-          if (App.mode === 'admin') TrainingModule.renderGadgetKB?.();
-        }
-        if (App.mode === 'admin') App.refresh();
-        SettingsModule.apply();
-      },
+      onSync: (type) => App.applyCloudUpdate(type),
       onAuthChange: (user) => {
         AuthModule.currentUser = user;
         const badge = document.getElementById('currentUserBadge');
