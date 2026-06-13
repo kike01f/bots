@@ -1610,6 +1610,7 @@ const ARTURITO_GADGET_KB_SEED = [
 
   const FIREBASE_CONFIG_KEY = 'arturito_firebase_config';
   const CLOUD_SYNC_KEY = 'arturito_cloud_sync_v2';
+  const PENDING_SETTINGS_KEY = 'arturito_pending_settings_v1';
   const LOCAL_DB_KEY = 'arturito_ai_database';
   const FIREBASE_SDK = '10.14.1';
 
@@ -2307,6 +2308,13 @@ const ARTURITO_GADGET_KB_SEED = [
   }
 
   /* ─── CloudSyncBridge — local ↔ nube unificado ─── */
+  const CLOUD_SETTINGS_KEYS = [
+    'buildingName', 'logo', 'primaryColor', 'secondaryColor', 'botName',
+    'welcomeMessage', 'portalTagline', 'portalHint', 'theme',
+    'quickQuestions', 'topicsMenuIntro', 'showTopicsOnWelcome',
+    'chatShortcuts', 'chatMessages', 'gadgetCategories', 'updatedAt'
+  ];
+
   class CloudSyncBridge {
     constructor(fb, auth, tickets, knowledge) {
       this.fb = fb;
@@ -2318,6 +2326,7 @@ const ARTURITO_GADGET_KB_SEED = [
       this._liveDb = null;
       this._liveOnUpdate = null;
       this._cloudKBActive = false;
+      this._cloudSettingsActive = false;
       this._pushing = false;
       this._syncing = false;
     }
@@ -2462,21 +2471,70 @@ const ARTURITO_GADGET_KB_SEED = [
       }
     }
 
-    /** Descarga KB y settings públicos (sin login) */
-    async pullPublicCloudData(database) {
+    /** Campos de settings que manda la nube (fuente de verdad) */
+    applyRemoteSettings(local, remote) {
+      if (!remote || typeof remote !== 'object') return local || {};
+      const merged = { ...(local || {}) };
+      CLOUD_SETTINGS_KEYS.forEach((key) => {
+        if (remote[key] !== undefined) merged[key] = remote[key];
+      });
+      if (local?.adminKey) merged.adminKey = local.adminKey;
+      if (remote.updatedAt) {
+        merged.updatedAt = remote.updatedAt;
+        this._cloudSettingsActive = true;
+      }
+      return merged;
+    }
+
+    settingsFingerprint(settings) {
+      const s = settings || {};
+      return [
+        s.updatedAt || 0,
+        s.buildingName || '',
+        s.botName || '',
+        s.welcomeMessage || '',
+        s.primaryColor || '',
+        s.theme || ''
+      ].join('|');
+    }
+
+    /** Descarga KB y settings públicos desde el servidor (sin caché) */
+    async pullPublicCloudData(database, forceServer = true) {
       if (!this.fb.isEnabled()) return false;
-      const { getDocs, getDoc } = this.fb._modules;
+      const { getDoc, getDocFromServer, getDocs, getDocsFromServer } = this.fb._modules;
       let pulled = false;
+      const settingsRef = this.fb.doc(`condominios/${this._cid()}/settings/main`);
       try {
-        const settingsSnap = await getDoc(this.fb.doc(`condominios/${this._cid()}/settings/main`));
-        if (settingsSnap.exists()) {
-          database.settings = this.mergeCloudSettings(database.settings, settingsSnap.data());
-          pulled = true;
+        let settingsSnap = null;
+        if (forceServer && getDocFromServer) {
+          try { settingsSnap = await getDocFromServer(settingsRef); } catch (_) {}
         }
-        const [gadgetSnap, manualSnap] = await Promise.all([
-          getDocs(this.fb.col('gadget_kb')),
-          getDocs(this.fb.col('knowledge_base'))
-        ]);
+        if (!settingsSnap) settingsSnap = await getDoc(settingsRef);
+        if (settingsSnap.exists()) {
+          const prevFp = this.settingsFingerprint(database.settings);
+          database.settings = this.applyRemoteSettings(database.settings, settingsSnap.data());
+          if (this.settingsFingerprint(database.settings) !== prevFp) pulled = true;
+          this._cacheLocal(database);
+        }
+
+        let gadgetSnap;
+        let manualSnap;
+        if (forceServer && getDocsFromServer) {
+          try {
+            [gadgetSnap, manualSnap] = await Promise.all([
+              getDocsFromServer(this.fb.col('gadget_kb')),
+              getDocsFromServer(this.fb.col('knowledge_base'))
+            ]);
+          } catch (_) {
+            gadgetSnap = manualSnap = null;
+          }
+        }
+        if (!gadgetSnap || !manualSnap) {
+          [gadgetSnap, manualSnap] = await Promise.all([
+            getDocs(this.fb.col('gadget_kb')),
+            getDocs(this.fb.col('knowledge_base'))
+          ]);
+        }
         if (gadgetSnap.size > 0) {
           database.gadgetKB = gadgetSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
           this._cloudKBActive = true;
@@ -2528,14 +2586,31 @@ const ARTURITO_GADGET_KB_SEED = [
     }
 
     mergeCloudSettings(local, remote) {
-      if (!remote || typeof remote !== 'object') return local || {};
-      const remoteTs = remote.updatedAt || 0;
-      const localTs = local?.updatedAt || 0;
-      if (remoteTs < localTs) return local;
-      const merged = { ...(local || {}), ...remote };
-      if (local?.adminKey) merged.adminKey = local.adminKey;
-      merged.updatedAt = Math.max(remoteTs, localTs);
-      return merged;
+      return this.applyRemoteSettings(local, remote);
+    }
+
+    queuePendingSettings(settings) {
+      try {
+        localStorage.setItem(PENDING_SETTINGS_KEY, JSON.stringify(this.sanitizeSettingsForCloud(settings)));
+      } catch (_) {}
+    }
+
+    async flushPendingSettings(database) {
+      if (!this.fb.isEnabled() || !this.fb.auth?.currentUser) return false;
+      const raw = localStorage.getItem(PENDING_SETTINGS_KEY);
+      if (!raw) return false;
+      try {
+        const pending = JSON.parse(raw);
+        database.settings = this.applyRemoteSettings(database.settings, pending);
+        database.settings.updatedAt = Date.now();
+        await this.syncSettings(database.settings);
+        localStorage.removeItem(PENDING_SETTINGS_KEY);
+        this._cacheLocal(database);
+        return true;
+      } catch (err) {
+        console.warn('[CloudSync] flushPendingSettings:', err);
+        return false;
+      }
     }
 
     async pushGadgetKB(entries) {
@@ -2638,10 +2713,9 @@ const ARTURITO_GADGET_KB_SEED = [
         this.fb.doc(`condominios/${this._cid()}/settings/main`),
         (snap) => {
           if (this._pushing || !snap.exists()) return;
-          const remote = snap.data();
-          const prevTs = database.settings?.updatedAt || 0;
-          database.settings = this.mergeCloudSettings(database.settings, remote);
-          if ((database.settings?.updatedAt || 0) <= prevTs) return;
+          const prevFp = this.settingsFingerprint(database.settings);
+          database.settings = this.applyRemoteSettings(database.settings, snap.data());
+          if (this.settingsFingerprint(database.settings) === prevFp) return;
           this._cacheLocal(database);
           if (onUpdate) onUpdate('settings');
         },
@@ -2723,7 +2797,9 @@ const ARTURITO_GADGET_KB_SEED = [
       if (!this.fb.isEnabled() || this.sync._syncing) {
         return { local: true, cloud: false, reason: 'offline_or_syncing' };
       }
+      const needsCloud = scope === 'full' || scope === 'settings';
       if (!this.fb.auth?.currentUser) {
+        if (needsCloud) this.sync.queuePendingSettings(database.settings);
         return { local: true, cloud: false, reason: 'auth_required' };
       }
 
@@ -2805,6 +2881,14 @@ const ARTURITO_GADGET_KB_SEED = [
 
     async forceMigrate(database) {
       return this.sync.migrateLocalToCloud(database);
+    }
+
+    /** Refresca settings/KB desde servidor (p. ej. al volver a la app) */
+    async refreshFromCloud(database, onSync) {
+      if (!this.fb.isEnabled()) return false;
+      const pulled = await this.sync.pullPublicCloudData(database, true);
+      if (pulled && onSync) onSync('settings');
+      return pulled;
     }
   }
 
@@ -2928,6 +3012,7 @@ const ARTURITO_GADGET_KB_SEED = [
         await auth.init(async (user) => {
           if (options.onAuthChange) options.onAuthChange(user);
           if (options.database) {
+            if (user) await store.sync.flushPendingSettings(options.database);
             sync.bindTicketsWatch(options.database, sync._liveOnUpdate);
           }
         });
@@ -3640,7 +3725,7 @@ const DatabaseModule = {
     this.ensureDefaults();
     const purged = this.purgePilotData();
     const repaired = this.repairKnowledgeIfEmpty();
-    this.save();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(database));
     this.autoBackup();
     return { purged, repaired };
   },
@@ -5193,11 +5278,15 @@ const SettingsModule = {
     database.settings.portalTagline = document.getElementById('setPortalTagline').value.trim();
     database.settings.portalHint = document.getElementById('setPortalHint').value.trim();
     database.settings.updatedAt = Date.now();
-    await DatabaseModule.save('settings');
+    const result = await DatabaseModule.save('settings');
     this.apply();
     this.replayPortalEntrance();
     if (document.getElementById('ccWelcome')) document.getElementById('ccWelcome').value = database.settings.welcomeMessage;
-    toast('Configuración guardada correctamente', 'success');
+    if (result?.cloud) {
+      toast('Configuración sincronizada en todos los dispositivos', 'success');
+    } else {
+      toast('Guardado local. Inicia sesión con Firebase para sincronizar en la nube.', 'warning');
+    }
   },
   /** Alterna tema claro/oscuro */
   async toggleTheme() {
@@ -5225,9 +5314,13 @@ const AuthModule = {
   },
   /** Verifica sesión guardada */
   checkSession() {
-    if (this.useFirebase() && ArturitoCloud.auth.currentUser) {
-      this.currentUser = ArturitoCloud.auth.currentUser;
-      return ArturitoCloud.auth.isStaff(this.currentUser);
+    if (this.useFirebase()) {
+      if (ArturitoCloud.auth.currentUser) {
+        this.currentUser = ArturitoCloud.auth.currentUser;
+        return ArturitoCloud.auth.isStaff(this.currentUser);
+      }
+      sessionStorage.removeItem(SESSION_KEY);
+      return false;
     }
     try {
       const s = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
@@ -5256,10 +5349,17 @@ const AuthModule = {
         const user = await ArturitoCloud.auth.login(email, pass);
         this.currentUser = user;
         DatabaseModule._authWarned = false;
-        await DatabaseModule.save('full');
+        if (await ArturitoCloud.sync.flushPendingSettings(database)) {
+          toast('Cambios pendientes sincronizados con la nube', 'info');
+        }
+        const syncResult = await DatabaseModule.save('full');
         this.hideLogin();
         App.setMode('admin');
-        toast('Bienvenido, ' + user.nombre, 'success');
+        if (syncResult?.cloud) {
+          toast('Bienvenido, ' + user.nombre + '. Datos sincronizados en la nube.', 'success');
+        } else {
+          toast('Bienvenido, ' + user.nombre, 'success');
+        }
         return true;
       } catch (err) {
         toast(err.message || 'Credenciales incorrectas', 'error');
@@ -6936,11 +7036,15 @@ const TrainingModule = {
       noTickets: document.getElementById('ccNoTickets').value.trim()
     };
     database.settings.updatedAt = Date.now();
-    await DatabaseModule.save('settings');
+    const result = await DatabaseModule.save('settings');
     SettingsModule.apply();
     ChatModule.applyLiveSettings();
     document.getElementById('setWelcomeMsg').value = database.settings.welcomeMessage;
-    toast('Contenido del chat actualizado', 'success');
+    if (result?.cloud) {
+      toast('Contenido del chat sincronizado en todos los dispositivos', 'success');
+    } else {
+      toast('Guardado local. Inicia sesión con Firebase para sincronizar.', 'warning');
+    }
   },
   /** Renderiza tabla entrenamiento manual */
   renderManual() {
@@ -7367,7 +7471,7 @@ function registerArturitoServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   var scope = location.pathname.replace(/[^/]*$/, '') || '/';
   var swCode = [
-    "const CACHE_NAME='arturito-ai-v4';",
+    "const CACHE_NAME='arturito-ai-v5';",
     "self.addEventListener('install',function(e){",
     "var SCOPE=self.registration.scope;",
     "var OFFLINE=[SCOPE,new URL('index.html',SCOPE).href,",
@@ -7440,23 +7544,7 @@ const App = {
     const boot = DatabaseModule.init();
     const purgedPilot = boot?.purged;
     const repairedKB = boot?.repaired;
-    KnowledgeBaseModule.syncFromGadget();
     await IDBModule.init();
-    await RAGModule.rebuildIndex();
-    SettingsModule.apply();
-    ArturitoModule.init();
-    AuthModule.init();
-    GadgetModule.init();
-    ChatModule.init();
-    SettingsModule.init();
-    TicketModule.init();
-    TrainingModule.init();
-    UserModule.init();
-    AdminModule.init();
-    ReportModule.init();
-    NavModule.init();
-    hydrateIcons();
-    wrapSearchBoxes();
 
     global.KnowledgeBaseModule = KnowledgeBaseModule;
 
@@ -7493,6 +7581,23 @@ const App = {
       console.warn('[Arturito] capa Firebase embebida no disponible');
     }
 
+    KnowledgeBaseModule.syncFromGadget();
+    await RAGModule.rebuildIndex();
+    SettingsModule.apply();
+    ArturitoModule.init();
+    AuthModule.init();
+    GadgetModule.init();
+    ChatModule.init();
+    SettingsModule.init();
+    TicketModule.init();
+    TrainingModule.init();
+    UserModule.init();
+    AdminModule.init();
+    ReportModule.init();
+    NavModule.init();
+    hydrateIcons();
+    wrapSearchBoxes();
+
     window.TicketModule = TicketModule;
     window.ChatModule = ChatModule;
     window.TrainingModule = TrainingModule;
@@ -7505,6 +7610,11 @@ const App = {
     if (repairedKB) toast('Base de conocimiento restaurada desde la semilla original', 'success');
 
     registerArturitoServiceWorker();
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible' || typeof ArturitoCloud === 'undefined' || !ArturitoCloud.store) return;
+      void ArturitoCloud.store.refreshFromCloud(database, (type) => App.applyCloudUpdate(type));
+    });
 
     const cloudOn = typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled?.();
     console.log('ARTURITO AI — Modo:', this.mode, '| Cloud:', cloudOn || false, '| Temas indexados:', RAGModule.index.length);
