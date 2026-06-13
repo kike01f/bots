@@ -2450,7 +2450,6 @@ const ARTURITO_GADGET_KB_SEED = [
     }
 
     async ensureCondominioDoc(name) {
-      if (!this.fb.auth?.currentUser) return;
       const { setDoc, getDoc } = this.fb._modules;
       const id = this._cid();
       const ref = this.fb.doc(`condominios/${id}`);
@@ -2479,8 +2478,8 @@ const ARTURITO_GADGET_KB_SEED = [
         if (remote[key] !== undefined) merged[key] = remote[key];
       });
       if (local?.adminKey) merged.adminKey = local.adminKey;
-      if (remote.updatedAt) {
-        merged.updatedAt = remote.updatedAt;
+      if (remote.updatedAt) merged.updatedAt = remote.updatedAt;
+      if (remote.updatedAt || remote.buildingName !== undefined) {
         this._cloudSettingsActive = true;
       }
       return merged;
@@ -2589,22 +2588,18 @@ const ARTURITO_GADGET_KB_SEED = [
       return this.applyRemoteSettings(local, remote);
     }
 
-    queuePendingSettings(settings) {
-      try {
-        localStorage.setItem(PENDING_SETTINGS_KEY, JSON.stringify(this.sanitizeSettingsForCloud(settings)));
-      } catch (_) {}
-    }
+    queuePendingSettings() { /* sync público — ya no requiere cola por auth */ }
 
     async flushPendingSettings(database) {
-      if (!this.fb.isEnabled() || !this.fb.auth?.currentUser) return false;
+      if (!this.fb.isEnabled()) return false;
       const raw = localStorage.getItem(PENDING_SETTINGS_KEY);
       if (!raw) return false;
       try {
+        localStorage.removeItem(PENDING_SETTINGS_KEY);
         const pending = JSON.parse(raw);
         database.settings = this.applyRemoteSettings(database.settings, pending);
         database.settings.updatedAt = Date.now();
         await this.syncSettings(database.settings);
-        localStorage.removeItem(PENDING_SETTINGS_KEY);
         this._cacheLocal(database);
         return true;
       } catch (err) {
@@ -2644,9 +2639,7 @@ const ARTURITO_GADGET_KB_SEED = [
     }
 
     async migrateLocalToCloud(database) {
-      if (!this.fb.isEnabled() || !this.fb.auth?.currentUser) {
-        return { ok: false, reason: 'auth_required' };
-      }
+      if (!this.fb.isEnabled()) return { ok: false };
       await this.ensureCondominioDoc(database.settings?.buildingName);
       await this.syncSettings(database.settings);
 
@@ -2654,9 +2647,12 @@ const ARTURITO_GADGET_KB_SEED = [
         database.manualKnowledge = (database.knowledge || []).filter((k) => k.origin !== 'gadget');
       }
 
-      await this.batchWrite('tickets', (database.tickets || []).slice(0, 500), (t) => this.tickets.mapFromLocal(t), (t) => t.id);
       await this.pushGadgetKB(database.gadgetKB || []);
       await this.pushManualKnowledge(database.manualKnowledge || []);
+
+      if (this.fb.auth?.currentUser) {
+        await this.batchWrite('tickets', (database.tickets || []).slice(0, 500), (t) => this.tickets.mapFromLocal(t), (t) => t.id);
+      }
 
       if (global.IDBModule?.documentsCache?.length) {
         await this.migrateTrainingDocuments(global.IDBModule.documentsCache);
@@ -2797,11 +2793,6 @@ const ARTURITO_GADGET_KB_SEED = [
       if (!this.fb.isEnabled() || this.sync._syncing) {
         return { local: true, cloud: false, reason: 'offline_or_syncing' };
       }
-      const needsCloud = scope === 'full' || scope === 'settings';
-      if (!this.fb.auth?.currentUser) {
-        if (needsCloud) this.sync.queuePendingSettings(database.settings);
-        return { local: true, cloud: false, reason: 'auth_required' };
-      }
 
       this.sync._pushing = true;
       let cloudOk = true;
@@ -2829,7 +2820,7 @@ const ARTURITO_GADGET_KB_SEED = [
       return { local: true, cloud: cloudOk };
     }
 
-    /** Al conectar: baja datos públicos de la nube; sube solo si hay sesión admin */
+    /** Al conectar: baja datos públicos de la nube; sube local si la nube está vacía */
     async bootstrap(database, callbacks = {}) {
       if (!this.fb.isEnabled()) return { mode: 'local' };
 
@@ -2839,7 +2830,6 @@ const ARTURITO_GADGET_KB_SEED = [
 
       let counts = { gadgetKB: 0, manualKB: 0, tickets: 0 };
       let migrated = false;
-      const canWriteCloud = !!this.fb.auth?.currentUser;
 
       try {
         counts = await this.sync.getCloudCounts();
@@ -2850,18 +2840,16 @@ const ARTURITO_GADGET_KB_SEED = [
       await this.sync.pullPublicCloudData(database);
 
       const cloudHasKB = counts.gadgetKB > 0 || counts.manualKB > 0;
+      const cloudHasSettings = this.sync._cloudSettingsActive;
       const localGadget = database.gadgetKB?.length || 0;
       const localManual = database.manualKnowledge?.length || 0;
       const localHasData = localGadget > 0 || localManual > 0;
 
-      if (!cloudHasKB && canWriteCloud && localHasData) {
+      if ((!cloudHasKB || !cloudHasSettings) && localHasData) {
         try {
           await this.sync.ensureCondominioDoc(database.settings?.buildingName);
           const mig = await this.sync.migrateLocalToCloud(database);
-          if (mig?.ok) {
-            migrated = true;
-            global.toast?.('Conocimiento local migrado a la nube', 'success');
-          }
+          if (mig?.ok) migrated = true;
         } catch (err) {
           console.warn('[DataStore] migrateLocalToCloud:', err);
         }
@@ -3012,7 +3000,7 @@ const ARTURITO_GADGET_KB_SEED = [
         await auth.init(async (user) => {
           if (options.onAuthChange) options.onAuthChange(user);
           if (options.database) {
-            if (user) await store.sync.flushPendingSettings(options.database);
+            await store.sync.flushPendingSettings(options.database);
             sync.bindTicketsWatch(options.database, sync._liveOnUpdate);
           }
         });
@@ -3857,11 +3845,8 @@ const DatabaseModule = {
   async save(scope = 'full') {
     if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.store) {
       const result = await ArturitoCloud.store.persist(database, scope);
-      if (result?.reason === 'auth_required' && typeof App !== 'undefined' && App.mode === 'admin') {
-        if (!DatabaseModule._authWarned) {
-          DatabaseModule._authWarned = true;
-          toast('Cambios guardados localmente. Inicia sesión con Firebase para respaldar en la nube.', 'warning');
-        }
+      if (!result?.cloud && result?.reason !== 'offline_or_syncing' && typeof App !== 'undefined' && App.mode === 'admin') {
+        toast('No se pudo sincronizar con la nube. Revisa la conexión.', 'error');
       }
       return result;
     }
@@ -5285,7 +5270,7 @@ const SettingsModule = {
     if (result?.cloud) {
       toast('Configuración sincronizada en todos los dispositivos', 'success');
     } else {
-      toast('Guardado local. Inicia sesión con Firebase para sincronizar en la nube.', 'warning');
+      toast('Guardado local. Sin conexión a la nube.', 'warning');
     }
   },
   /** Alterna tema claro/oscuro */
@@ -5314,13 +5299,9 @@ const AuthModule = {
   },
   /** Verifica sesión guardada */
   checkSession() {
-    if (this.useFirebase()) {
-      if (ArturitoCloud.auth.currentUser) {
-        this.currentUser = ArturitoCloud.auth.currentUser;
-        return ArturitoCloud.auth.isStaff(this.currentUser);
-      }
-      sessionStorage.removeItem(SESSION_KEY);
-      return false;
+    if (this.useFirebase() && ArturitoCloud.auth.currentUser) {
+      this.currentUser = ArturitoCloud.auth.currentUser;
+      return ArturitoCloud.auth.isStaff(this.currentUser);
     }
     try {
       const s = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
@@ -5348,18 +5329,11 @@ const AuthModule = {
       try {
         const user = await ArturitoCloud.auth.login(email, pass);
         this.currentUser = user;
-        DatabaseModule._authWarned = false;
-        if (await ArturitoCloud.sync.flushPendingSettings(database)) {
-          toast('Cambios pendientes sincronizados con la nube', 'info');
-        }
-        const syncResult = await DatabaseModule.save('full');
+        await ArturitoCloud.sync.flushPendingSettings(database);
+        await DatabaseModule.save('full');
         this.hideLogin();
         App.setMode('admin');
-        if (syncResult?.cloud) {
-          toast('Bienvenido, ' + user.nombre + '. Datos sincronizados en la nube.', 'success');
-        } else {
-          toast('Bienvenido, ' + user.nombre, 'success');
-        }
+        toast('Bienvenido, ' + user.nombre, 'success');
         return true;
       } catch (err) {
         toast(err.message || 'Credenciales incorrectas', 'error');
@@ -7043,7 +7017,7 @@ const TrainingModule = {
     if (result?.cloud) {
       toast('Contenido del chat sincronizado en todos los dispositivos', 'success');
     } else {
-      toast('Guardado local. Inicia sesión con Firebase para sincronizar.', 'warning');
+      toast('Guardado local. Sin conexión a la nube.', 'warning');
     }
   },
   /** Renderiza tabla entrenamiento manual */
@@ -7471,7 +7445,7 @@ function registerArturitoServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   var scope = location.pathname.replace(/[^/]*$/, '') || '/';
   var swCode = [
-    "const CACHE_NAME='arturito-ai-v5';",
+    "const CACHE_NAME='arturito-ai-v6';",
     "self.addEventListener('install',function(e){",
     "var SCOPE=self.registration.scope;",
     "var OFFLINE=[SCOPE,new URL('index.html',SCOPE).href,",
