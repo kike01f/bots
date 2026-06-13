@@ -652,6 +652,12 @@ body.mode-client #adminApp{display:none!important}
 .kb-gadget-entry-preview{font-size:.8rem;color:var(--text);line-height:1.4;max-height:4.2em;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
 .kb-gadget-keywords{display:flex;flex-wrap:wrap;gap:.25rem;margin-top:.45rem}
 .kb-gadget-kw{font-size:.68rem;padding:.12rem .4rem;border-radius:99px;background:color-mix(in srgb,var(--arturito-green,#7FBA02) 12%,transparent);color:var(--arturito-green-dark,#5a8501)}
+.cloud-badge{font-size:.72rem;font-weight:600;padding:.28rem .65rem;border-radius:999px;border:1px solid var(--border);white-space:nowrap}
+.cloud-badge.cloud-on{background:rgba(16,185,129,.12);color:#059669;border-color:rgba(16,185,129,.35)}
+.cloud-badge.cloud-off{background:rgba(148,163,184,.12);color:var(--text-muted)}
+.firebase-config-card{margin-top:1.25rem;padding-top:1.25rem;border-top:1px dashed var(--border)}
+.firebase-config-card h3{font-size:1rem;margin-bottom:.35rem}
+.firebase-config-card p{font-size:.82rem;color:var(--text-muted);margin-bottom:1rem}
 .stat-card.purple{border-left-color:#8b5cf6}
 .stat-card.purple .stat-value{color:#7c3aed}
 .chat-confidence{font-size:.68rem;font-weight:700;margin-top:.35rem;padding:.2rem .45rem;border-radius:6px;display:inline-block;background:rgba(127,186,2,.12);color:var(--arturito-green-dark,#5a8501)}
@@ -1585,6 +1591,7 @@ const ARTURITO_GADGET_KB_SEED = [
   }
 ];
 </script>
+<script src="../arturito-firebase.js"></script>
 </head>
 <body class="mode-client">
 <!-- ═══ PORTAL RESIDENTE (público) ═══ -->
@@ -1660,6 +1667,7 @@ const ARTURITO_GADGET_KB_SEED = [
       <button type="button" class="btn btn-secondary" id="loginCancel" style="flex:1">Volver</button>
       <button type="button" class="btn btn-primary" id="loginBtn" style="flex:1">Ingresar</button>
     </div>
+    <button type="button" id="btnForgotPass" style="background:none;border:none;color:var(--primary);font-size:.78rem;margin-top:.75rem;cursor:pointer;width:100%">¿Olvidaste tu contraseña?</button>
     <p style="font-size:.72rem;color:var(--text-muted);margin-top:1rem;text-align:center">Acceso restringido al personal autorizado</p>
   </div>
 </div>
@@ -1696,6 +1704,7 @@ const ARTURITO_GADGET_KB_SEED = [
         <h2 id="pageTitle">Dashboard</h2>
       </div>
       <div class="topbar-actions">
+        <span id="cloudStatusBadge" class="cloud-badge cloud-off">Conectando…</span>
         <span id="currentUserBadge" style="font-size:.8rem;color:var(--text-muted)"></span>
         <button class="btn btn-secondary btn-sm" id="btnBackup"><span data-icon="backup" data-icon-size="sm"></span> Backup</button>
         <button class="btn btn-secondary btn-sm" id="btnRestore"><span data-icon="restore" data-icon-size="sm"></span> Restaurar</button>
@@ -1922,6 +1931,24 @@ const ARTURITO_GADGET_KB_SEED = [
             <div class="form-group full"><label>Mensaje principal</label><textarea id="setPortalHint" rows="4" placeholder="Texto visible en la tarjeta central. Usa **negrita** y saltos de línea."></textarea></div>
             <div class="form-group full"><button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar Configuración</button></div>
           </form>
+          <div class="firebase-config-card">
+            <h3>Firebase Cloud</h3>
+            <p>Proyecto <strong>chatbots-hipodromo</strong>. Todo el conocimiento, tickets y configuración se respaldan en Firestore. Editable en tiempo real desde el panel.</p>
+            <form id="firebaseConfigForm" class="form-grid">
+              <div class="form-group"><label>API Key</label><input type="text" id="fbApiKey" autocomplete="off" value="AIzaSyBocB2dUQCo2CB3rpFDWvsoUZzS1v-g5Qg"></div>
+              <div class="form-group"><label>Auth Domain</label><input type="text" id="fbAuthDomain" value="chatbots-hipodromo.firebaseapp.com"></div>
+              <div class="form-group"><label>Project ID</label><input type="text" id="fbProjectId" value="chatbots-hipodromo"></div>
+              <div class="form-group"><label>Storage Bucket</label><input type="text" id="fbStorageBucket" value="chatbots-hipodromo.firebasestorage.app"></div>
+              <div class="form-group"><label>Messaging Sender ID</label><input type="text" id="fbMessagingSenderId" value="138621852452"></div>
+              <div class="form-group"><label>App ID</label><input type="text" id="fbAppId" value="1:138621852452:web:43ee805662e0d39bf331b1"></div>
+              <div class="form-group full"><label>ID Condominio (multi-tenant)</label><input type="text" id="fbCondominioId" value="entre-cerros"></div>
+              <div class="form-group full" style="display:flex;gap:.5rem;flex-wrap:wrap">
+                <button type="button" class="btn btn-secondary btn-sm" id="btnTestFirebase">Probar conexión</button>
+                <button type="submit" class="btn btn-primary btn-sm">Guardar y conectar</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnMigrateCloud">Sincronizar local → nube</button>
+              </div>
+            </form>
+          </div>
           <div class="settings-preview" id="settingsPreview"></div>
           <div class="settings-preview" id="portalPreview" style="margin-top:.75rem;flex-direction:column;align-items:stretch;text-align:center"></div>
         </div>
@@ -2078,7 +2105,7 @@ const ARTURITO_GADGET_KB_SEED = [
 <script>
 /* ═══════════════════════════════════════════════════════════════
    ARTURITO AI — Aplicación Monolítica
-   Arquitectura modular — almacenamiento local (localStorage)
+   Local + Firebase Cloud (Firestore, Auth, Storage)
    ═══════════════════════════════════════════════════════════════ */
 
 const STORAGE_KEY = 'arturito_ai_database';
@@ -2384,9 +2411,13 @@ const DatabaseModule = {
     if (!database.conversations) database.conversations = [];
     if (typeof KnowledgeBaseModule !== 'undefined') KnowledgeBaseModule.syncFromGadget();
   },
-  /** Persiste en localStorage */
+  /** Persiste local + nube (UnifiedDataStore) */
   save(scope = 'full') {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(database));
+    if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.store) {
+      ArturitoCloud.store.persist(database, scope);
+    } else {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(database));
+    }
   },
   /** Genera ID único */
   uid(prefix = 'id') { return prefix + '_' + Date.now() + '_' + Math.random().toString(36).substr(2,5); },
@@ -3818,11 +3849,18 @@ const SettingsModule = {
   }
 };
 
-/* ─── AuthModule — Acceso administrativo local ─── */
+/* ─── AuthModule — Acceso administrativo (local + Firebase Auth) ─── */
 const AuthModule = {
   currentUser: null,
+  useFirebase() {
+    return typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled();
+  },
   /** Verifica sesión guardada */
   checkSession() {
+    if (this.useFirebase() && ArturitoCloud.auth.currentUser) {
+      this.currentUser = ArturitoCloud.auth.currentUser;
+      return ArturitoCloud.auth.isStaff(this.currentUser);
+    }
     try {
       const s = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
       if (s && s.email && Date.now() - s.ts < 86400000) {
@@ -3841,9 +3879,24 @@ const AuthModule = {
   /** Oculta overlay de login */
   hideLogin() { document.getElementById('adminLogin').classList.remove('show'); },
   /** Intenta autenticar administrador */
-  login() {
+  async login() {
     const email = document.getElementById('loginEmail').value.trim();
     const pass = document.getElementById('loginPass').value;
+
+    if (this.useFirebase()) {
+      try {
+        const user = await ArturitoCloud.auth.login(email, pass);
+        this.currentUser = user;
+        this.hideLogin();
+        App.setMode('admin');
+        toast('Bienvenido, ' + user.nombre, 'success');
+        return true;
+      } catch (err) {
+        toast(err.message || 'Credenciales incorrectas', 'error');
+        return false;
+      }
+    }
+
     const user = database.users.find(u => u.email === email && ['Administrador','Conserje','Comité','SuperAdmin','Supervisor','Operador'].includes(u.rol));
     const key = database.settings.adminKey || 'admin123';
     if (user && pass === key) {
@@ -3857,8 +3910,21 @@ const AuthModule = {
     toast('Credenciales incorrectas', 'error');
     return false;
   },
+  /** Recuperación de contraseña Firebase */
+  async forgotPassword() {
+    const email = document.getElementById('loginEmail').value.trim();
+    if (!email) { toast('Ingresa tu correo primero', 'warning'); return; }
+    if (!this.useFirebase()) { toast('Recuperación disponible solo con Firebase conectado', 'info'); return; }
+    try {
+      await ArturitoCloud.auth.resetPassword(email);
+      toast('Revisa tu correo para restablecer la contraseña', 'success');
+    } catch (err) {
+      toast(err.message || 'No se pudo enviar el correo', 'error');
+    }
+  },
   /** Cierra sesión administrativa */
-  logout() {
+  async logout() {
+    if (this.useFirebase()) await ArturitoCloud.auth.logout().catch(() => {});
     this.currentUser = null;
     sessionStorage.removeItem(SESSION_KEY);
     App.setMode('client');
@@ -3869,6 +3935,7 @@ const AuthModule = {
     document.getElementById('btnAdminAccess').addEventListener('click', () => this.showLogin());
     document.getElementById('loginBtn').addEventListener('click', () => this.login());
     document.getElementById('loginCancel').addEventListener('click', () => this.hideLogin());
+    document.getElementById('btnForgotPass')?.addEventListener('click', () => this.forgotPassword());
     document.getElementById('loginPass').addEventListener('keydown', e => { if (e.key === 'Enter') this.login(); });
     document.getElementById('btnLogout').addEventListener('click', () => this.logout());
   }
@@ -4267,7 +4334,9 @@ const ResponseEngine = {
     const query = this.buildContextualQuery(userText, conv);
     const match = this.retrieve(query);
     const text = this.compose(query, match, intent);
-    const confidence = match ? Math.min(100, Math.round((match.score || 0) / 0.45 * 100)) : 0;
+    const confidence = typeof ArturitoCloud !== 'undefined' && ArturitoCloud.chatbot
+      ? ArturitoCloud.chatbot.computeConfidence(match)
+      : (match ? Math.min(100, Math.round((match.score || 0) / 0.45 * 100)) : 0);
 
     if (text) {
       const expression = match && match.score >= 0.42 ? 'happy' : (match && match.score >= 0.28 ? 'think' : 'confused');
@@ -4509,6 +4578,13 @@ const ChatModule = {
     let replyText = result.text;
     if (result.escalate && result.confidence < 70) {
       replyText += '\n\nNo estoy 100% seguro de esta respuesta. ¿Quieres que cree una solicitud para que el equipo te contacte?';
+      if (ArturitoCloud?.fb?.isEnabled()) {
+        ArturitoCloud.notifications.push({
+          titulo: 'Consulta con baja confianza',
+          mensaje: text.substring(0, 120),
+          tipo: 'low_confidence'
+        }).catch(() => {});
+      }
     }
 
     this.addBotMessage(replyText, result.actions, {
@@ -4819,6 +4895,9 @@ const TicketModule = {
           await this.persistPendingFiles(editId);
           const attachments = await TicketAttachmentModule.listMeta(editId);
           database.tickets[idx] = { ...database.tickets[idx], ...data, attachments };
+          if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled()) {
+            try { await ArturitoCloud.tickets.update(editId, data); } catch (err) { console.warn('[Cloud] ticket update:', err); }
+          }
         }
         toast('Ticket actualizado', 'success');
       } else {
@@ -4827,6 +4906,13 @@ const TicketModule = {
         database.tickets.unshift(ticket);
         const newMetas = await this.persistPendingFiles(newId);
         ticket.attachments = newMetas.length ? await TicketAttachmentModule.listMeta(newId) : [];
+        if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled()) {
+          try {
+            await ArturitoCloud.tickets.create(ticket, this._pendingFiles.slice());
+          } catch (err) {
+            console.warn('[Cloud] ticket create:', err);
+          }
+        }
         toast('Ticket creado: ' + newId, 'success');
         if (App.mode === 'client' && ChatModule.getCurrent()) {
           const attNote = ticket.attachments.length ? ` Se adjuntaron ${ticket.attachments.length} documento(s).` : '';
@@ -5606,17 +5692,22 @@ const AdminModule = {
   },
   /** Renderiza dashboard completo */
   render() {
-    const t = database.tickets;
-    const stats = [
-      { label:'Total Tickets', value: t.length, cls:'teal' },
-      { label:'Abiertos', value: t.filter(x=>['Abierto','En Revisión','Asignado','En Proceso'].includes(x.estado)).length, cls:'amber' },
-      { label:'Cerrados', value: t.filter(x=>x.estado==='Cerrado'||x.estado==='Resuelto').length, cls:'green' },
-      { label:'Reclamos', value: t.filter(x=>x.categoria==='Reclamos').length, cls:'indigo' },
-      { label:'Emergencias', value: t.filter(x=>x.categoria==='Emergencias').length, cls:'red' },
-      { label:'Usuarios', value: database.users.length, cls:'blue' }
-    ];
-    document.getElementById('adminStats').innerHTML = stats.map(s =>
-      `<div class="stat-card ${s.cls}"><div class="stat-value">${s.value}</div><div class="stat-label">${s.label}</div></div>`).join('');
+    if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.DashboardManager) {
+      const metrics = ArturitoCloud.DashboardManager.computeMetrics(database);
+      ArturitoCloud.DashboardManager.renderStatCards(document.getElementById('adminStats'), metrics);
+    } else {
+      const t = database.tickets;
+      const stats = [
+        { label:'Total Tickets', value: t.length, cls:'teal' },
+        { label:'Abiertos', value: t.filter(x=>['Abierto','En Revisión','Asignado','En Proceso'].includes(x.estado)).length, cls:'amber' },
+        { label:'Cerrados', value: t.filter(x=>x.estado==='Cerrado'||x.estado==='Resuelto').length, cls:'green' },
+        { label:'Reclamos', value: t.filter(x=>x.categoria==='Reclamos').length, cls:'indigo' },
+        { label:'Emergencias', value: t.filter(x=>x.categoria==='Emergencias').length, cls:'red' },
+        { label:'Usuarios', value: database.users.length, cls:'blue' }
+      ];
+      document.getElementById('adminStats').innerHTML = stats.map(s =>
+        `<div class="stat-card ${s.cls}"><div class="stat-value">${s.value}</div><div class="stat-label">${s.label}</div></div>`).join('');
+    }
     this.renderTable();
     const badge = document.getElementById('currentUserBadge');
     if (badge && AuthModule.currentUser) {
@@ -5895,6 +5986,36 @@ const App = {
     hydrateIcons();
     wrapSearchBoxes();
 
+    const cloudHandlers = {
+      onSync: async (type) => {
+        if (type === 'gadgetKB' || type === 'knowledge') {
+          KnowledgeBaseModule.syncFromGadget();
+          await RAGModule.rebuildIndex();
+          if (App.mode === 'admin') TrainingModule.renderGadgetKB?.();
+        }
+        if (App.mode === 'admin') App.refresh();
+        SettingsModule.apply();
+      },
+      onAuthChange: (user) => {
+        AuthModule.currentUser = user;
+        const badge = document.getElementById('currentUserBadge');
+        if (badge) badge.textContent = user ? `${user.nombre} · ${user.rol}` : '';
+      }
+    };
+
+    if (typeof ArturitoCloud !== 'undefined') {
+      ArturitoCloud.UIManager.bindFirebaseConfigForm(ArturitoCloud.fb, async () => {
+        await ArturitoCloud.init({ database, ...cloudHandlers });
+        await RAGModule.rebuildIndex();
+      });
+      try {
+        await ArturitoCloud.init({ database, ...cloudHandlers });
+        await RAGModule.rebuildIndex();
+      } catch (_) {
+        ArturitoCloud.UIManager.setCloudBadge(false, 'Modo local');
+      }
+    }
+
     window.TicketModule = TicketModule;
     window.ChatModule = ChatModule;
     window.TrainingModule = TrainingModule;
@@ -5910,7 +6031,7 @@ const App = {
       navigator.serviceWorker.register('../sw.js').catch(() => {});
     }
 
-    console.log('ARTURITO AI — Modo:', this.mode, '| Temas indexados:', RAGModule.index.length);
+    console.log('ARTURITO AI — Modo:', this.mode, '| Cloud:', ArturitoCloud?.fb?.isEnabled?.() || false, '| Temas indexados:', RAGModule.index.length);
   },
   /** Refresca vistas administrativas */
   refresh() {
