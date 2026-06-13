@@ -2470,7 +2470,7 @@ const ARTURITO_GADGET_KB_SEED = [
       try {
         const settingsSnap = await getDoc(this.fb.doc(`condominios/${this._cid()}/settings/main`));
         if (settingsSnap.exists()) {
-          database.settings = { ...database.settings, ...settingsSnap.data() };
+          database.settings = this.mergeCloudSettings(database.settings, settingsSnap.data());
           pulled = true;
         }
         const [gadgetSnap, manualSnap] = await Promise.all([
@@ -2499,10 +2499,43 @@ const ARTURITO_GADGET_KB_SEED = [
 
     async syncSettings(settings) {
       const { setDoc } = this.fb._modules;
-      await setDoc(this.fb.doc(`condominios/${this._cid()}/settings/main`), {
-        ...settings,
+      const payload = this.sanitizeSettingsForCloud(settings);
+      await setDoc(this.fb.doc(`condominios/${this._cid()}/settings/main`), payload, { merge: true });
+      return payload;
+    }
+
+    sanitizeSettingsForCloud(settings) {
+      const s = settings || {};
+      const payload = {
+        buildingName: s.buildingName || '',
+        logo: s.logo || '',
+        primaryColor: s.primaryColor || '#0d9488',
+        secondaryColor: s.secondaryColor || '#6366f1',
+        botName: s.botName || 'Arturito',
+        welcomeMessage: s.welcomeMessage || '',
+        portalTagline: s.portalTagline || '',
+        portalHint: s.portalHint || '',
+        theme: s.theme || 'light',
+        quickQuestions: Array.isArray(s.quickQuestions) ? s.quickQuestions.slice() : [],
+        topicsMenuIntro: s.topicsMenuIntro || '',
+        showTopicsOnWelcome: s.showTopicsOnWelcome !== false,
+        chatShortcuts: Array.isArray(s.chatShortcuts) ? s.chatShortcuts.map((x) => ({ ...x })) : [],
+        chatMessages: s.chatMessages ? { ...s.chatMessages } : {},
+        gadgetCategories: s.gadgetCategories ? JSON.parse(JSON.stringify(s.gadgetCategories)) : {},
         updatedAt: Date.now()
-      }, { merge: true });
+      };
+      return JSON.parse(JSON.stringify(payload));
+    }
+
+    mergeCloudSettings(local, remote) {
+      if (!remote || typeof remote !== 'object') return local || {};
+      const remoteTs = remote.updatedAt || 0;
+      const localTs = local?.updatedAt || 0;
+      if (remoteTs < localTs) return local;
+      const merged = { ...(local || {}), ...remote };
+      if (local?.adminKey) merged.adminKey = local.adminKey;
+      merged.updatedAt = Math.max(remoteTs, localTs);
+      return merged;
     }
 
     async pushGadgetKB(entries) {
@@ -2604,11 +2637,13 @@ const ARTURITO_GADGET_KB_SEED = [
       const settingsUnsub = onSnapshot(
         this.fb.doc(`condominios/${this._cid()}/settings/main`),
         (snap) => {
-          if (snap.exists()) {
-            database.settings = { ...database.settings, ...snap.data() };
-            this._cacheLocal(database);
-            if (onUpdate) onUpdate('settings');
-          }
+          if (this._pushing || !snap.exists()) return;
+          const remote = snap.data();
+          const prevTs = database.settings?.updatedAt || 0;
+          database.settings = this.mergeCloudSettings(database.settings, remote);
+          if ((database.settings?.updatedAt || 0) <= prevTs) return;
+          this._cacheLocal(database);
+          if (onUpdate) onUpdate('settings');
         },
         this._snapErr('settings')
       );
@@ -2696,7 +2731,11 @@ const ARTURITO_GADGET_KB_SEED = [
       let cloudOk = true;
       try {
         if (scope === 'full' || scope === 'settings') {
-          await this.sync.syncSettings(database.settings);
+          database.settings = database.settings || {};
+          database.settings.updatedAt = Date.now();
+          const synced = await this.sync.syncSettings(database.settings);
+          if (synced?.updatedAt) database.settings.updatedAt = synced.updatedAt;
+          localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
         }
         if (scope === 'full' || scope === 'gadgetKB') {
           await this.sync.pushGadgetKB(database.gadgetKB || []);
@@ -2732,14 +2771,14 @@ const ARTURITO_GADGET_KB_SEED = [
         console.warn('[DataStore] getCloudCounts:', err);
       }
 
+      await this.sync.pullPublicCloudData(database);
+
       const cloudHasKB = counts.gadgetKB > 0 || counts.manualKB > 0;
       const localGadget = database.gadgetKB?.length || 0;
       const localManual = database.manualKnowledge?.length || 0;
       const localHasData = localGadget > 0 || localManual > 0;
 
-      if (cloudHasKB) {
-        await this.sync.pullPublicCloudData(database);
-      } else if (canWriteCloud && localHasData) {
+      if (!cloudHasKB && canWriteCloud && localHasData) {
         try {
           await this.sync.ensureCondominioDoc(database.settings?.buildingName);
           const mig = await this.sync.migrateLocalToCloud(database);
@@ -5143,7 +5182,7 @@ const SettingsModule = {
       </div>`;
   },
   /** Guarda configuración desde formulario */
-  save(e) {
+  async save(e) {
     e.preventDefault();
     database.settings.buildingName = document.getElementById('setBuildingName').value.trim();
     database.settings.logo = document.getElementById('setLogo').value.trim();
@@ -5153,16 +5192,18 @@ const SettingsModule = {
     database.settings.welcomeMessage = document.getElementById('setWelcomeMsg').value.trim();
     database.settings.portalTagline = document.getElementById('setPortalTagline').value.trim();
     database.settings.portalHint = document.getElementById('setPortalHint').value.trim();
-    DatabaseModule.save('settings');
+    database.settings.updatedAt = Date.now();
+    await DatabaseModule.save('settings');
     this.apply();
     this.replayPortalEntrance();
     if (document.getElementById('ccWelcome')) document.getElementById('ccWelcome').value = database.settings.welcomeMessage;
     toast('Configuración guardada correctamente', 'success');
   },
   /** Alterna tema claro/oscuro */
-  toggleTheme() {
+  async toggleTheme() {
     database.settings.theme = database.settings.theme === 'dark' ? 'light' : 'dark';
-    DatabaseModule.save('settings');
+    database.settings.updatedAt = Date.now();
+    await DatabaseModule.save('settings');
     this.apply();
   },
   /** Inicializa eventos de configuración */
@@ -5722,6 +5763,28 @@ const ChatModule = {
         input.focus();
       });
     }
+  },
+  /** Refresca chat en vivo cuando cambian settings desde la nube */
+  applyLiveSettings() {
+    this.renderQuickQuestions();
+    this.renderChatShortcuts();
+    const conv = this.getCurrent();
+    if (!conv?.messages?.length) return;
+    const greeting = database.settings.welcomeMessage?.trim() || ARTURITO_PERSONALITY.getGreeting();
+    const intro = getTopicsMenuIntro();
+    let touched = false;
+    conv.messages.forEach((m) => {
+      if (m.type === 'bot' && m.topicsMenu) {
+        m.text = intro;
+        touched = true;
+      }
+    });
+    const firstBot = conv.messages.find((m) => m.type === 'bot' && !m.topicsMenu);
+    if (firstBot && conv.messages.filter((m) => m.type === 'user').length === 0) {
+      firstBot.text = greeting;
+      touched = true;
+    }
+    if (touched) this.renderMessages();
   },
   /** Crea nueva conversación */
   startNewConversation(options) {
@@ -6859,7 +6922,7 @@ const TrainingModule = {
     document.getElementById('ccNoTickets').value = cm.noTickets || DEFAULT_CHAT_MESSAGES.noTickets;
   },
   /** Guarda contenido editable del chatbot */
-  saveChatContent(e) {
+  async saveChatContent(e) {
     e.preventDefault();
     database.settings.welcomeMessage = document.getElementById('ccWelcome').value.trim();
     database.settings.quickQuestions = document.getElementById('ccQuickQuestions').value.split('\n').map(l=>l.trim()).filter(Boolean);
@@ -6872,10 +6935,10 @@ const TrainingModule = {
       ticketPrompt: document.getElementById('ccTicketPrompt').value.trim(),
       noTickets: document.getElementById('ccNoTickets').value.trim()
     };
-    DatabaseModule.save();
+    database.settings.updatedAt = Date.now();
+    await DatabaseModule.save('settings');
     SettingsModule.apply();
-    ChatModule.renderQuickQuestions();
-    ChatModule.renderChatShortcuts();
+    ChatModule.applyLiveSettings();
     document.getElementById('setWelcomeMsg').value = database.settings.welcomeMessage;
     toast('Contenido del chat actualizado', 'success');
   },
@@ -7335,8 +7398,10 @@ const App = {
   async applyCloudUpdate(type) {
     if (type === 'settings' || type === 'gadgetKB' || type === 'knowledge') {
       SettingsModule.apply();
-      ChatModule.renderQuickQuestions();
-      ChatModule.renderChatShortcuts();
+      ChatModule.applyLiveSettings();
+    }
+    if (type === 'settings' && this.mode === 'admin') {
+      TrainingModule.renderChatContentForm?.();
     }
     if (type === 'gadgetKB' || type === 'knowledge') {
       KnowledgeBaseModule.syncFromGadget();
@@ -7401,8 +7466,7 @@ const App = {
         KnowledgeBaseModule.syncFromGadget();
         void RAGModule.rebuildIndex().then(() => {
           SettingsModule.apply();
-          ChatModule.renderQuickQuestions();
-          ChatModule.renderChatShortcuts();
+          ChatModule.applyLiveSettings();
         });
       },
       onAuthChange: (user) => {
