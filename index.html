@@ -2317,6 +2317,7 @@ const ARTURITO_GADGET_KB_SEED = [
       this._ticketsUnsub = null;
       this._liveDb = null;
       this._liveOnUpdate = null;
+      this._cloudKBActive = false;
       this._pushing = false;
       this._syncing = false;
     }
@@ -2425,29 +2426,75 @@ const ARTURITO_GADGET_KB_SEED = [
 
     async getCloudCounts() {
       const { getDocs } = this.fb._modules;
-      const [gadget, manual, tickets] = await Promise.all([
+      const [gadget, manual] = await Promise.all([
         getDocs(this.fb.col('gadget_kb')),
-        getDocs(this.fb.col('knowledge_base')),
-        getDocs(this.fb.col('tickets'))
+        getDocs(this.fb.col('knowledge_base'))
       ]);
-      return { gadgetKB: gadget.size, manualKB: manual.size, tickets: tickets.size };
+      let tickets = 0;
+      if (this.fb.auth?.currentUser) {
+        try {
+          const t = await getDocs(this.fb.col('tickets'));
+          tickets = t.size;
+        } catch (_) {}
+      }
+      return { gadgetKB: gadget.size, manualKB: manual.size, tickets };
     }
 
     async ensureCondominioDoc(name) {
+      if (!this.fb.auth?.currentUser) return;
       const { setDoc, getDoc } = this.fb._modules;
       const id = this._cid();
       const ref = this.fb.doc(`condominios/${id}`);
-      const snap = await getDoc(ref);
-      if (!snap.exists()) {
-        await setDoc(ref, {
-          id,
-          nombre: name || 'Mi Condominio',
-          direccion: '',
-          administrador: '',
-          fechaCreacion: Date.now(),
-          publico: true
-        });
+      try {
+        const snap = await getDoc(ref);
+        if (!snap.exists()) {
+          await setDoc(ref, {
+            id,
+            nombre: name || 'Mi Condominio',
+            direccion: '',
+            administrador: '',
+            fechaCreacion: Date.now(),
+            publico: true
+          });
+        }
+      } catch (err) {
+        console.warn('[CloudSync] ensureCondominioDoc:', err);
       }
+    }
+
+    /** Descarga KB y settings públicos (sin login) */
+    async pullPublicCloudData(database) {
+      if (!this.fb.isEnabled()) return false;
+      const { getDocs, getDoc } = this.fb._modules;
+      let pulled = false;
+      try {
+        const settingsSnap = await getDoc(this.fb.doc(`condominios/${this._cid()}/settings/main`));
+        if (settingsSnap.exists()) {
+          database.settings = { ...database.settings, ...settingsSnap.data() };
+          pulled = true;
+        }
+        const [gadgetSnap, manualSnap] = await Promise.all([
+          getDocs(this.fb.col('gadget_kb')),
+          getDocs(this.fb.col('knowledge_base'))
+        ]);
+        if (gadgetSnap.size > 0) {
+          database.gadgetKB = gadgetSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          this._cloudKBActive = true;
+          pulled = true;
+        }
+        if (manualSnap.size > 0) {
+          database.manualKnowledge = manualSnap.docs.map((d) => this.mapManualFromCloud(d.id, d.data()));
+          this._cloudKBActive = true;
+          pulled = true;
+        }
+        if (pulled) {
+          this.applyUnifiedKnowledge(database);
+          this._cacheLocal(database);
+        }
+      } catch (err) {
+        console.warn('[CloudSync] pullPublicCloudData:', err);
+      }
+      return pulled;
     }
 
     async syncSettings(settings) {
@@ -2489,7 +2536,9 @@ const ARTURITO_GADGET_KB_SEED = [
     }
 
     async migrateLocalToCloud(database) {
-      if (!this.fb.isEnabled()) return { ok: false };
+      if (!this.fb.isEnabled() || !this.fb.auth?.currentUser) {
+        return { ok: false, reason: 'auth_required' };
+      }
       await this.ensureCondominioDoc(database.settings?.buildingName);
       await this.syncSettings(database.settings);
 
@@ -2506,6 +2555,7 @@ const ARTURITO_GADGET_KB_SEED = [
       }
 
       localStorage.setItem(CLOUD_SYNC_KEY, String(Date.now()));
+      this._cloudKBActive = true;
       return { ok: true };
     }
 
@@ -2568,8 +2618,11 @@ const ARTURITO_GADGET_KB_SEED = [
         this.fb.col('gadget_kb'),
         (snap) => {
           if (this._pushing) return;
+          const remote = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          if (!remote.length && !this._cloudKBActive && (database.gadgetKB?.length || 0) > 0) return;
+          if (remote.length) this._cloudKBActive = true;
           this._syncing = true;
-          database.gadgetKB = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          database.gadgetKB = remote;
           this.applyUnifiedKnowledge(database);
           this._cacheLocal(database);
           this._syncing = false;
@@ -2583,8 +2636,11 @@ const ARTURITO_GADGET_KB_SEED = [
         this.fb.col('knowledge_base'),
         (snap) => {
           if (this._pushing) return;
+          const remote = snap.docs.map((d) => this.mapManualFromCloud(d.id, d.data()));
+          if (!remote.length && !this._cloudKBActive && (database.manualKnowledge?.length || 0) > 0) return;
+          if (remote.length) this._cloudKBActive = true;
           this._syncing = true;
-          database.manualKnowledge = snap.docs.map((d) => this.mapManualFromCloud(d.id, d.data()));
+          database.manualKnowledge = remote;
           this.applyUnifiedKnowledge(database);
           this._cacheLocal(database);
           this._syncing = false;
@@ -2658,33 +2714,42 @@ const ARTURITO_GADGET_KB_SEED = [
       return { local: true, cloud: cloudOk };
     }
 
-    /** Al conectar: sube local vacío en nube, o baja nube si local está vacío */
+    /** Al conectar: baja datos públicos de la nube; sube solo si hay sesión admin */
     async bootstrap(database, callbacks = {}) {
       if (!this.fb.isEnabled()) return { mode: 'local' };
-
-      await this.sync.ensureCondominioDoc(database.settings?.buildingName);
 
       if (!database.manualKnowledge) {
         database.manualKnowledge = (database.knowledge || []).filter((k) => k.origin !== 'gadget');
       }
 
-      const counts = await this.sync.getCloudCounts();
+      let counts = { gadgetKB: 0, manualKB: 0, tickets: 0 };
+      let migrated = false;
+      const canWriteCloud = !!this.fb.auth?.currentUser;
+
+      try {
+        counts = await this.sync.getCloudCounts();
+      } catch (err) {
+        console.warn('[DataStore] getCloudCounts:', err);
+      }
+
+      const cloudHasKB = counts.gadgetKB > 0 || counts.manualKB > 0;
       const localGadget = database.gadgetKB?.length || 0;
       const localManual = database.manualKnowledge?.length || 0;
-      let migrated = false;
-
-      const cloudEmpty = counts.gadgetKB === 0 && counts.manualKB === 0;
       const localHasData = localGadget > 0 || localManual > 0;
 
-      if (cloudEmpty && localHasData) {
-        await this.sync.migrateLocalToCloud(database);
-        migrated = true;
-        global.toast?.('Conocimiento local migrado a la nube', 'success');
-      } else if (!cloudEmpty && localGadget === 0 && localManual === 0) {
-        migrated = false;
-      } else if (localHasData && !localStorage.getItem(CLOUD_SYNC_KEY)) {
-        await this.sync.migrateLocalToCloud(database);
-        migrated = true;
+      if (cloudHasKB) {
+        await this.sync.pullPublicCloudData(database);
+      } else if (canWriteCloud && localHasData) {
+        try {
+          await this.sync.ensureCondominioDoc(database.settings?.buildingName);
+          const mig = await this.sync.migrateLocalToCloud(database);
+          if (mig?.ok) {
+            migrated = true;
+            global.toast?.('Conocimiento local migrado a la nube', 'success');
+          }
+        } catch (err) {
+          console.warn('[DataStore] migrateLocalToCloud:', err);
+        }
       }
 
       this.sync.applyUnifiedKnowledge(database);
@@ -2693,6 +2758,8 @@ const ARTURITO_GADGET_KB_SEED = [
       this.sync.startRealtimeSync(database, (type) => {
         if (callbacks.onSync) callbacks.onSync(type);
       });
+
+      if (callbacks.onReady) callbacks.onReady({ counts, migrated, cloudHasKB });
 
       return { mode: 'cloud', migrated, counts };
     }
@@ -2826,7 +2893,10 @@ const ARTURITO_GADGET_KB_SEED = [
           }
         });
         if (options.database) {
-          await store.bootstrap(options.database, { onSync: options.onSync });
+          await store.bootstrap(options.database, {
+            onSync: options.onSync,
+            onReady: options.onReady
+          });
         }
         UIManager.setCloudBadge(true, 'Firebase · ' + fb.getCondominioId());
         return true;
@@ -7326,7 +7396,15 @@ const App = {
     global.KnowledgeBaseModule = KnowledgeBaseModule;
 
     const cloudHandlers = {
-      onSync: (type) => App.applyCloudUpdate(type),
+      onSync: (type) => { void App.applyCloudUpdate(type); },
+      onReady: () => {
+        KnowledgeBaseModule.syncFromGadget();
+        void RAGModule.rebuildIndex().then(() => {
+          SettingsModule.apply();
+          ChatModule.renderQuickQuestions();
+          ChatModule.renderChatShortcuts();
+        });
+      },
       onAuthChange: (user) => {
         AuthModule.currentUser = user;
         const badge = document.getElementById('currentUserBadge');
@@ -7337,11 +7415,11 @@ const App = {
     if (typeof ArturitoCloud !== 'undefined') {
       ArturitoCloud.UIManager.bindFirebaseConfigForm(ArturitoCloud.fb, async () => {
         await ArturitoCloud.init({ database, ...cloudHandlers });
-        await RAGModule.rebuildIndex();
+        cloudHandlers.onReady();
       });
       try {
         await ArturitoCloud.init({ database, ...cloudHandlers });
-        await RAGModule.rebuildIndex();
+        cloudHandlers.onReady();
       } catch (_) {
         ArturitoCloud.UIManager.setCloudBadge(false, 'Modo local');
       }
