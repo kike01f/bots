@@ -666,7 +666,15 @@ body.mode-client #adminApp{display:none!important}
 .chart-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:1rem}
 .chart-card h4{font-size:.85rem;margin-bottom:.75rem;color:var(--text-muted);font-weight:600}
 </style>
-<link rel="manifest" href="../manifest.json">
+<script>
+(function(){
+  var manifest = {"name":"ARTURITO AI","short_name":"Arturito","description":"Asistente inteligente para administración de condominios","start_url":".","scope":".","display":"standalone","background_color":"#0f172a","theme_color":"#7FBA02","orientation":"portrait-primary","icons":[{"src":"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%237FBA02'/%3E%3Ctext x='32' y='42' text-anchor='middle' fill='white' font-size='28' font-family='sans-serif' font-weight='700'%3EA%3C/text%3E%3C/svg%3E","sizes":"192x192","type":"image/svg+xml","purpose":"any maskable"}]};
+  var link = document.createElement('link');
+  link.rel = 'manifest';
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(manifest)], { type: 'application/json' }));
+  document.head.appendChild(link);
+})();
+</script>
 <meta name="theme-color" content="#7FBA02">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -1591,7 +1599,1162 @@ const ARTURITO_GADGET_KB_SEED = [
   }
 ];
 </script>
-<script src="../arturito-firebase.js"></script>
+<script>
+/* ─── Firebase Cloud (embebido) ─── */
+/**
+ * ARTURITO AI — Capa Firebase Enterprise
+ * Managers: Firebase, Auth, Storage, Knowledge, Tickets, Training, Notifications, Dashboard, Chatbot, Sync
+ */
+(function (global) {
+  'use strict';
+
+  const FIREBASE_CONFIG_KEY = 'arturito_firebase_config';
+  const CLOUD_SYNC_KEY = 'arturito_cloud_sync_v2';
+  const LOCAL_DB_KEY = 'arturito_ai_database';
+  const FIREBASE_SDK = '10.14.1';
+
+  /** Configuración del proyecto chatbots-hipodromo (SDK modular) */
+  const DEFAULT_FIREBASE_CONFIG = {
+    apiKey: 'AIzaSyBocB2dUQCo2CB3rpFDWvsoUZzS1v-g5Qg',
+    authDomain: 'chatbots-hipodromo.firebaseapp.com',
+    projectId: 'chatbots-hipodromo',
+    storageBucket: 'chatbots-hipodromo.firebasestorage.app',
+    messagingSenderId: '138621852452',
+    appId: '1:138621852452:web:43ee805662e0d39bf331b1',
+    condominioId: 'entre-cerros'
+  };
+
+  if (!global.__ARTURITO_FIREBASE_CONFIG__) {
+    global.__ARTURITO_FIREBASE_CONFIG__ = DEFAULT_FIREBASE_CONFIG;
+  }
+  const ROLES = ['SuperAdmin', 'Administrador', 'Supervisor', 'Operador', 'Residente', 'Conserje', 'Comité'];
+  const STAFF_ROLES = ['SuperAdmin', 'Administrador', 'Supervisor', 'Operador', 'Conserje', 'Comité'];
+  const CONFIDENCE_THRESHOLD = 0.70;
+
+  const sdkUrl = (pkg) => `https://www.gstatic.com/firebasejs/${FIREBASE_SDK}/${pkg}`;
+
+  /** @returns {Promise<object>} Firebase modular SDK */
+  async function loadFirebaseModules() {
+    const [appMod, authMod, fsMod, stMod] = await Promise.all([
+      import(sdkUrl('firebase-app.js')),
+      import(sdkUrl('firebase-auth.js')),
+      import(sdkUrl('firebase-firestore.js')),
+      import(sdkUrl('firebase-storage.js'))
+    ]);
+    return { ...appMod, ...authMod, ...fsMod, ...stMod };
+  }
+
+  /* ─── FirebaseManager ─── */
+  class FirebaseManager {
+    static #instance = null;
+
+    constructor() {
+      this.app = null;
+      this.auth = null;
+      this.db = null;
+      this.storage = null;
+      this.enabled = false;
+      this.condominioId = null;
+      this._modules = null;
+      this._unsubs = [];
+    }
+
+    static getInstance() {
+      if (!FirebaseManager.#instance) FirebaseManager.#instance = new FirebaseManager();
+      return FirebaseManager.#instance;
+    }
+
+    loadConfig() {
+      try {
+        const raw = localStorage.getItem(FIREBASE_CONFIG_KEY);
+        if (raw) return JSON.parse(raw);
+      } catch (_) {}
+      const embedded = global.__ARTURITO_FIREBASE_CONFIG__;
+      if (embedded?.apiKey) {
+        return {
+          ...DEFAULT_FIREBASE_CONFIG,
+          ...embedded,
+          condominioId: embedded.condominioId || DEFAULT_FIREBASE_CONFIG.condominioId
+        };
+      }
+      return null;
+    }
+
+    getDefaultConfig() {
+      return { ...DEFAULT_FIREBASE_CONFIG, ...(global.__ARTURITO_FIREBASE_CONFIG__ || {}) };
+    }
+
+    saveConfig(config) {
+      localStorage.setItem(FIREBASE_CONFIG_KEY, JSON.stringify(config));
+    }
+
+    clearConfig() {
+      localStorage.removeItem(FIREBASE_CONFIG_KEY);
+      this.enabled = false;
+    }
+
+    isEnabled() {
+      return this.enabled && !!this.db;
+    }
+
+    getCondominioId() {
+      return this.condominioId || 'default';
+    }
+
+    col(name) {
+      const id = this.getCondominioId();
+      return this._collection(`condominios/${id}/${name}`);
+    }
+
+    doc(path) {
+      return this._doc(path);
+    }
+
+    _collection(path) {
+      if (!this._modules || !this.db) throw new Error('Firebase no inicializado');
+      return this._modules.collection(this.db, path);
+    }
+
+    _doc(path) {
+      if (!this._modules || !this.db) throw new Error('Firebase no inicializado');
+      return this._modules.doc(this.db, path);
+    }
+
+    async init(config) {
+      if (!config?.apiKey || !config?.projectId) {
+        this.enabled = false;
+        return false;
+      }
+      try {
+        this._modules = await loadFirebaseModules();
+        const { initializeApp, getAuth, getFirestore, getStorage } = this._modules;
+        this.app = initializeApp(config);
+        this.auth = getAuth(this.app);
+        this.db = getFirestore(this.app);
+        this.storage = getStorage(this.app);
+        this.enabled = true;
+        this.condominioId = config.condominioId || config.projectId || 'default';
+        this.saveConfig({ ...config, condominioId: this.condominioId });
+        return true;
+      } catch (err) {
+        console.error('[FirebaseManager] init error:', err);
+        this.enabled = false;
+        throw err;
+      }
+    }
+
+    async initFromStorage() {
+      const config = this.loadConfig();
+      if (!config?.apiKey) return false;
+      return this.init(config);
+    }
+
+    teardown() {
+      this._unsubs.forEach((fn) => { try { fn(); } catch (_) {} });
+      this._unsubs = [];
+      this.enabled = false;
+    }
+
+    onSnapshot(ref, cb, errCb) {
+      const { onSnapshot } = this._modules;
+      const unsub = onSnapshot(ref, cb, errCb || console.error);
+      this._unsubs.push(unsub);
+      return unsub;
+    }
+
+    serverTimestamp() {
+      return this._modules.serverTimestamp();
+    }
+
+    async testConnection() {
+      if (!this.isEnabled()) throw new Error('Firebase no configurado');
+      const { getDocs, limit, query } = this._modules;
+      await getDocs(query(this.col('settings'), limit(1)));
+      return true;
+    }
+  }
+
+  /* ─── AuthManager ─── */
+  class AuthManager {
+    constructor(fb) {
+      this.fb = fb;
+      this.currentUser = null;
+      this.profile = null;
+      this._authUnsub = null;
+    }
+
+    async init(onChange) {
+      if (!this.fb.isEnabled()) return;
+      const { onAuthStateChanged } = this.fb._modules;
+      return new Promise((resolve) => {
+        this._authUnsub = onAuthStateChanged(this.fb.auth, async (user) => {
+          if (user) {
+            this.profile = await this.loadProfile(user.uid);
+            this.currentUser = this.mapUser(user, this.profile);
+          } else {
+            this.currentUser = null;
+            this.profile = null;
+          }
+          if (onChange) onChange(this.currentUser);
+          resolve(this.currentUser);
+        });
+      });
+    }
+
+    async loadProfile(uid) {
+      const { getDoc } = this.fb._modules;
+      const snap = await getDoc(this.fb.doc(`users/${uid}`));
+      return snap.exists() ? snap.data() : null;
+    }
+
+    mapUser(fbUser, profile) {
+      return {
+        uid: fbUser.uid,
+        id: fbUser.uid,
+        email: fbUser.email,
+        nombre: profile?.nombre || fbUser.displayName || fbUser.email?.split('@')[0] || 'Usuario',
+        rol: profile?.rol || 'Operador',
+        departamento: profile?.departamento || '',
+        condominioId: profile?.condominioId || this.fb.getCondominioId(),
+        telefono: profile?.telefono || '',
+        activo: profile?.activo !== false
+      };
+    }
+
+    isStaff(user) {
+      return user && STAFF_ROLES.includes(user.rol);
+    }
+
+    async login(email, password) {
+      if (!this.fb.isEnabled()) return null;
+      const { signInWithEmailAndPassword } = this.fb._modules;
+      const cred = await signInWithEmailAndPassword(this.fb.auth, email, password);
+      this.profile = await this.loadProfile(cred.user.uid);
+      this.currentUser = this.mapUser(cred.user, this.profile);
+      if (!this.isStaff(this.currentUser)) {
+        await this.logout();
+        throw new Error('No tienes permisos de administración');
+      }
+      if (this.profile?.condominioId) this.fb.condominioId = this.profile.condominioId;
+      return this.currentUser;
+    }
+
+    async logout() {
+      if (!this.fb.isEnabled()) return;
+      const { signOut } = this.fb._modules;
+      await signOut(this.fb.auth);
+      this.currentUser = null;
+      this.profile = null;
+    }
+
+    async resetPassword(email) {
+      if (!this.fb.isEnabled()) throw new Error('Firebase no configurado');
+      const { sendPasswordResetEmail } = this.fb._modules;
+      await sendPasswordResetEmail(this.fb.auth, email);
+    }
+
+    async registerAdmin({ email, password, nombre, rol, condominioId, departamento }) {
+      if (!this.fb.isEnabled()) throw new Error('Firebase no configurado');
+      const { createUserWithEmailAndPassword, setDoc } = this.fb._modules;
+      const cred = await createUserWithEmailAndPassword(this.fb.auth, email, password);
+      const profile = {
+        uid: cred.user.uid,
+        nombre,
+        email,
+        telefono: '',
+        rol: rol || 'Administrador',
+        condominioId: condominioId || this.fb.getCondominioId(),
+        departamento: departamento || 'Administración',
+        activo: true,
+        fechaCreacion: Date.now()
+      };
+      await setDoc(this.fb.doc(`users/${cred.user.uid}`), profile);
+      await setDoc(this.fb.doc(`condominios/${profile.condominioId}/users/${cred.user.uid}`), profile);
+      return profile;
+    }
+  }
+
+  /* ─── StorageManager ─── */
+  class StorageManager {
+    constructor(fb) {
+      this.fb = fb;
+    }
+
+    pathTicket(condominioId, ticketId, fileName) {
+      return `condominios/${condominioId}/tickets/${ticketId}/${fileName}`;
+    }
+
+    pathTraining(condominioId, docId, fileName) {
+      return `condominios/${condominioId}/training/${docId}/${fileName}`;
+    }
+
+    async upload(file, storagePath, onProgress) {
+      if (!this.fb.isEnabled()) throw new Error('Firebase no configurado');
+      const { ref, uploadBytesResumable, getDownloadURL } = this.fb._modules;
+      const storageRef = ref(this.fb.storage, storagePath);
+      const task = uploadBytesResumable(storageRef, file);
+      return new Promise((resolve, reject) => {
+        task.on('state_changed',
+          (snap) => {
+            if (onProgress) onProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100));
+          },
+          reject,
+          async () => {
+            const url = await getDownloadURL(task.snapshot.ref);
+            resolve({
+              nombre: file.name,
+              url,
+              tipo: file.type,
+              tamaño: file.size,
+              fecha: Date.now()
+            });
+          }
+        );
+      });
+    }
+
+    async deletePath(storagePath) {
+      if (!this.fb.isEnabled()) return;
+      const { ref, deleteObject } = this.fb._modules;
+      await deleteObject(ref(this.fb.storage, storagePath));
+    }
+  }
+
+  /* ─── KnowledgeManager ─── */
+  class KnowledgeManager {
+    constructor(fb) {
+      this.fb = fb;
+    }
+
+    async listFAQ() {
+      if (!this.fb.isEnabled()) return [];
+      const { getDocs } = this.fb._modules;
+      const snap = await getDocs(this.fb.col('faq'));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    }
+
+    async listKnowledgeBase() {
+      if (!this.fb.isEnabled()) return [];
+      const { getDocs } = this.fb._modules;
+      const snap = await getDocs(this.fb.col('knowledge_base'));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    }
+
+    async saveFAQ(entry) {
+      const { setDoc, doc } = this.fb._modules;
+      const id = entry.id || `faq_${Date.now()}`;
+      const data = {
+        pregunta: entry.pregunta || entry.question,
+        respuesta: entry.respuesta || entry.answer,
+        categoria: entry.categoria || entry.category || 'General',
+        activa: entry.activa !== false,
+        palabrasClave: entry.palabrasClave || entry.keywords || [],
+        fechaCreacion: entry.fechaCreacion || Date.now()
+      };
+      await setDoc(doc(this.fb.col('faq'), id), data, { merge: true });
+      return { id, ...data };
+    }
+
+    async saveKnowledge(entry) {
+      const { setDoc, doc } = this.fb._modules;
+      const id = entry.id || `kb_${Date.now()}`;
+      const data = {
+        titulo: entry.titulo || entry.title,
+        categoria: entry.categoria || entry.category || 'General',
+        contenido: entry.contenido || entry.content,
+        palabrasClave: entry.palabrasClave || entry.keywords || [],
+        fechaCreacion: entry.fechaCreacion || Date.now()
+      };
+      await setDoc(doc(this.fb.col('knowledge_base'), id), data, { merge: true });
+      return { id, ...data };
+    }
+
+    async deleteCollectionItem(colName, id) {
+      const { deleteDoc, doc } = this.fb._modules;
+      await deleteDoc(doc(this.fb.col(colName), id));
+    }
+  }
+
+  /* ─── CloudTicketManager ─── */
+  class CloudTicketManager {
+    constructor(fb, storage, notifications) {
+      this.fb = fb;
+      this.storage = storage;
+      this.notifications = notifications;
+    }
+
+    mapFromLocal(t) {
+      return {
+        id: t.id,
+        numeroTicket: t.id,
+        asunto: t.categoria,
+        descripcion: t.descripcion,
+        categoria: t.categoria,
+        prioridad: t.prioridad,
+        estado: t.estado,
+        nombre: t.nombre,
+        departamento: t.departamento,
+        email: t.email,
+        fechaCreacion: t.createdAt || Date.now(),
+        fechaActualizacion: t.updatedAt || Date.now(),
+        creadoPor: t.creadoPor || t.email,
+        asignadoA: t.asignadoA || null,
+        adjuntos: t.attachments || []
+      };
+    }
+
+    mapToLocal(d, id) {
+      return {
+        id: d.numeroTicket || id,
+        nombre: d.nombre || '',
+        departamento: d.departamento || '',
+        email: d.email || '',
+        categoria: d.categoria || d.asunto || 'Consultas',
+        prioridad: d.prioridad || 'Media',
+        descripcion: d.descripcion || '',
+        estado: d.estado || 'Abierto',
+        attachments: d.adjuntos || [],
+        createdAt: d.fechaCreacion || Date.now(),
+        updatedAt: d.fechaActualizacion || Date.now(),
+        asignadoA: d.asignadoA,
+        creadoPor: d.creadoPor
+      };
+    }
+
+    async create(ticket, files = []) {
+      const { setDoc, doc } = this.fb._modules;
+      const id = ticket.id || ticket.numeroTicket;
+      const data = this.mapFromLocal(ticket);
+      data.fechaCreacion = Date.now();
+      data.fechaActualizacion = Date.now();
+
+      if (files.length) {
+        data.adjuntos = [];
+        for (const file of files) {
+          const path = this.storage.pathTicket(this.fb.getCondominioId(), id, `${Date.now()}_${file.name}`);
+          const meta = await this.storage.upload(file, path);
+          data.adjuntos.push(meta);
+        }
+      }
+
+      await setDoc(doc(this.fb.col('tickets'), id), data);
+      if (this.notifications) {
+        await this.notifications.push({
+          titulo: 'Nuevo ticket',
+          mensaje: `${id} — ${data.categoria}`,
+          tipo: 'ticket_created',
+          ticketId: id
+        });
+      }
+      return this.mapToLocal(data, id);
+    }
+
+    async update(id, patch) {
+      const { updateDoc, doc } = this.fb._modules;
+      const data = { ...patch, fechaActualizacion: Date.now() };
+      await updateDoc(doc(this.fb.col('tickets'), id), data);
+      return data;
+    }
+
+    async addResponse(ticketId, { usuarioId, mensaje, adjuntos = [] }) {
+      const { addDoc } = this.fb._modules;
+      const ref = await addDoc(this.fb.col('ticket_responses'), {
+        ticketId,
+        usuarioId,
+        mensaje,
+        adjuntos,
+        fecha: Date.now()
+      });
+      return ref.id;
+    }
+
+    watchTickets(callback) {
+      return this.fb.onSnapshot(this.fb.col('tickets'), (snap) => {
+        const tickets = snap.docs.map((d) => this.mapToLocal(d.data(), d.id));
+        callback(tickets);
+      });
+    }
+  }
+
+  /* ─── TrainingManagerFB ─── */
+  class TrainingManagerFB {
+    constructor(fb, storage) {
+      this.fb = fb;
+      this.storage = storage;
+    }
+
+    async saveDocument({ id, nombreArchivo, tipo, contenidoExtraido, keywords = [] }) {
+      const { setDoc, doc } = this.fb._modules;
+      const docId = id || `doc_${Date.now()}`;
+      const data = {
+        nombreArchivo,
+        tipo,
+        contenidoExtraido,
+        keywords,
+        fechaCarga: Date.now()
+      };
+      await setDoc(doc(this.fb.col('training_documents'), docId), data, { merge: true });
+      return { id: docId, ...data };
+    }
+
+    async uploadAndExtract(file, extractFn) {
+      const contenidoExtraido = extractFn ? await extractFn(file) : '';
+      const path = this.storage.pathTraining(this.fb.getCondominioId(), `doc_${Date.now()}`, file.name);
+      const meta = await this.storage.upload(file, path);
+      return this.saveDocument({
+        nombreArchivo: file.name,
+        tipo: file.type,
+        contenidoExtraido,
+        keywords: TrainingManagerFB.extractKeywords(contenidoExtraido)
+      });
+    }
+
+    static extractKeywords(text, max = 12) {
+      const words = String(text || '').toLowerCase()
+        .replace(/[^\wáéíóúñ\s]/gi, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length > 4);
+      const freq = {};
+      words.forEach((w) => { freq[w] = (freq[w] || 0) + 1; });
+      return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, max).map(([w]) => w);
+    }
+
+    async listDocuments() {
+      const { getDocs } = this.fb._modules;
+      const snap = await getDocs(this.fb.col('training_documents'));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    }
+  }
+
+  /* ─── NotificationManager ─── */
+  class NotificationManager {
+    constructor(fb, auth) {
+      this.fb = fb;
+      this.auth = auth;
+      this.items = [];
+    }
+
+    async push({ titulo, mensaje, usuarioDestino, tipo, ticketId }) {
+      if (!this.fb.isEnabled()) return;
+      const { addDoc } = this.fb._modules;
+      const uid = usuarioDestino || 'staff';
+      await addDoc(this.fb.col('notifications'), {
+        usuarioDestino: uid,
+        titulo,
+        mensaje,
+        leida: false,
+        tipo: tipo || 'info',
+        ticketId: ticketId || null,
+        fecha: Date.now()
+      });
+    }
+
+    watch(callback) {
+      if (!this.fb.isEnabled()) return () => {};
+      const { query, where, orderBy, limit } = this.fb._modules;
+      const uid = this.auth.currentUser?.uid;
+      const q = uid
+        ? query(this.fb.col('notifications'), where('usuarioDestino', 'in', [uid, 'staff']), orderBy('fecha', 'desc'), limit(50))
+        : query(this.fb.col('notifications'), orderBy('fecha', 'desc'), limit(50));
+      return this.fb.onSnapshot(q, (snap) => {
+        this.items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        callback(this.items);
+      }, () => callback([]));
+    }
+
+    async markRead(id) {
+      const { updateDoc, doc } = this.fb._modules;
+      await updateDoc(doc(this.fb.col('notifications'), id), { leida: true });
+    }
+  }
+
+  /* ─── DashboardManager ─── */
+  class DashboardManager {
+    static computeMetrics(database, chatSessions = []) {
+      const t = database.tickets || [];
+      const openStates = ['Abierto', 'En Revisión', 'Asignado', 'En Proceso'];
+      const closedStates = ['Resuelto', 'Cerrado'];
+      const open = t.filter((x) => openStates.includes(x.estado));
+      const closed = t.filter((x) => closedStates.includes(x.estado));
+      const critical = t.filter((x) => x.prioridad === 'Crítica' || x.prioridad === 'Alta');
+      const resolved = closed.filter((x) => x.updatedAt && x.createdAt);
+      const avgMs = resolved.length
+        ? resolved.reduce((s, x) => s + (x.updatedAt - x.createdAt), 0) / resolved.length
+        : 0;
+      const avgHours = avgMs ? Math.round(avgMs / 3600000) : 0;
+      const docs = database.trainingDocs || database.documents || [];
+      return {
+        totalTickets: t.length,
+        openTickets: open.length,
+        closedTickets: closed.length,
+        criticalTickets: critical.length,
+        avgResponseHours: avgHours,
+        activeUsers: (database.users || []).filter((u) => u.activo !== false).length,
+        aiConversations: (database.conversations || []).length + chatSessions.length,
+        trainedDocuments: docs.length || (database.knowledge || []).length,
+        satisfaction: database.settings?.satisfactionScore || 92
+      };
+    }
+
+    static renderStatCards(container, metrics) {
+      if (!container) return;
+      const stats = [
+        { label: 'Tickets abiertos', value: metrics.openTickets, cls: 'amber' },
+        { label: 'Tickets cerrados', value: metrics.closedTickets, cls: 'green' },
+        { label: 'Tickets críticos', value: metrics.criticalTickets, cls: 'red' },
+        { label: 'Tiempo prom. respuesta', value: metrics.avgResponseHours + 'h', cls: 'teal' },
+        { label: 'Usuarios activos', value: metrics.activeUsers, cls: 'blue' },
+        { label: 'Conversaciones IA', value: metrics.aiConversations, cls: 'indigo' },
+        { label: 'Documentos entrenados', value: metrics.trainedDocuments, cls: 'purple' },
+        { label: 'Satisfacción', value: metrics.satisfaction + '%', cls: 'green' }
+      ];
+      container.innerHTML = stats.map((s) =>
+        `<div class="stat-card ${s.cls}"><div class="stat-value">${s.value}</div><div class="stat-label">${s.label}</div></div>`
+      ).join('');
+    }
+  }
+
+  /* ─── ChatbotManager ─── */
+  class ChatbotManager {
+    constructor(knowledge, tickets) {
+      this.knowledge = knowledge;
+      this.tickets = tickets;
+      this.lastConfidence = 0;
+    }
+
+    /** Busca en FAQ de Firestore + local */
+    async buscarFAQ(query, localSearchFn) {
+      let results = [];
+      if (localSearchFn) results = localSearchFn(query) || [];
+      if (this.knowledge?.fb?.isEnabled()) {
+        try {
+          const faqs = await this.knowledge.listFAQ();
+          const q = query.toLowerCase();
+          faqs.filter((f) => f.activa !== false).forEach((f) => {
+            const score = (f.pregunta || '').toLowerCase().includes(q) ? 0.9
+              : (f.respuesta || '').toLowerCase().includes(q) ? 0.75 : 0;
+            if (score) results.push({ source: 'faq', score, title: f.pregunta, content: f.respuesta });
+          });
+        } catch (_) {}
+      }
+      return results.sort((a, b) => b.score - a.score);
+    }
+
+    buscarKnowledgeBase(query, localRetrieveFn) {
+      return localRetrieveFn ? localRetrieveFn(query) : null;
+    }
+
+    async buscarDocumentos(query, ragSearchFn) {
+      if (ragSearchFn) return ragSearchFn(query, 5);
+      if (!this.knowledge?.fb?.isEnabled()) return [];
+      const docs = await this.knowledge.listKnowledgeBase();
+      const q = query.toLowerCase();
+      return docs.filter((d) => (d.contenido || '').toLowerCase().includes(q))
+        .map((d) => ({ source: 'document', score: 0.6, title: d.titulo, content: d.contenido }));
+    }
+
+    buscarTickets(query, localTickets) {
+      const t = localTickets || [];
+      const q = query.toLowerCase();
+      return t.filter((x) =>
+        (x.id || '').toLowerCase().includes(q) ||
+        (x.descripcion || '').toLowerCase().includes(q) ||
+        (x.departamento || '').toLowerCase().includes(q)
+      );
+    }
+
+    computeConfidence(match) {
+      if (!match) return 0;
+      const score = match.score ?? match.confidence ?? 0;
+      this.lastConfidence = Math.min(100, Math.round((score / 0.45) * 100));
+      return this.lastConfidence;
+    }
+
+    formatConfidenceLabel(confidence) {
+      return `Confianza: ${confidence}%`;
+    }
+
+    shouldEscalate(confidence) {
+      return confidence < CONFIDENCE_THRESHOLD * 100;
+    }
+
+    async respond(query, context = {}) {
+      const { localRetrieve, ragSearch, faqSearch, tickets, compose, onLowConfidence } = context;
+      let match = this.buscarKnowledgeBase(query, localRetrieve);
+      if (!match || (match.score || 0) < 0.25) {
+        const faqs = await this.buscarFAQ(query, faqSearch);
+        if (faqs[0]) match = faqs[0];
+      }
+      if (!match || (match.score || 0) < 0.2) {
+        const docs = await this.buscarDocumentos(query, ragSearch);
+        if (docs[0]) match = docs[0];
+      }
+      const confidence = this.computeConfidence(match);
+      const body = match && compose ? compose(query, match) : null;
+
+      if (this.shouldEscalate(confidence) && onLowConfidence) {
+        await onLowConfidence({ query, confidence, match });
+      }
+
+      return {
+        body,
+        confidence,
+        confidenceLabel: this.formatConfidenceLabel(confidence),
+        match,
+        escalate: this.shouldEscalate(confidence)
+      };
+    }
+  }
+
+  /* ─── CloudSyncBridge — local ↔ nube unificado ─── */
+  class CloudSyncBridge {
+    constructor(fb, auth, tickets, knowledge) {
+      this.fb = fb;
+      this.auth = auth;
+      this.tickets = tickets;
+      this.knowledge = knowledge;
+      this._unsubs = [];
+      this._pushing = false;
+      this._syncing = false;
+    }
+
+    _cid() {
+      return this.fb.getCondominioId();
+    }
+
+    _docPath(collection, id) {
+      return `condominios/${this._cid()}/${collection}/${id}`;
+    }
+
+    mapManualToCloud(entry) {
+      const kw = entry.keywords || entry.keywordList || entry.palabrasClave || [];
+      return {
+        titulo: entry.pregunta || entry.titulo || '',
+        contenido: entry.respuesta || entry.contenido || '',
+        categoria: entry.categoria || 'General',
+        palabrasClave: Array.isArray(kw) ? kw : String(kw).split(',').map((k) => k.trim()).filter(Boolean),
+        origin: 'manual',
+        enabled: entry.enabled !== false,
+        fechaCreacion: entry.createdAt || entry.fechaCreacion || Date.now(),
+        updatedAt: Date.now()
+      };
+    }
+
+    mapManualFromCloud(id, data) {
+      return {
+        id,
+        origin: 'manual',
+        pregunta: data.titulo || data.pregunta || '',
+        respuesta: data.contenido || data.respuesta || '',
+        categoria: data.categoria || 'General',
+        keywords: (data.palabrasClave || []).join(', '),
+        keywordList: data.palabrasClave || [],
+        enabled: data.enabled !== false,
+        createdAt: data.fechaCreacion || Date.now(),
+        updatedAt: data.updatedAt || Date.now()
+      };
+    }
+
+    applyUnifiedKnowledge(database) {
+      const manual = database.manualKnowledge || [];
+      const synced = (database.gadgetKB || [])
+        .filter((e) => e.enabled !== false)
+        .map((e) => {
+          const kw = e.keywords || [];
+          return {
+            id: e.id,
+            origin: 'gadget',
+            gadgetId: e.id,
+            gadgetKey: e.key,
+            pregunta: e.title || e.question || '',
+            respuesta: e.response || '',
+            keywords: kw.join(', '),
+            keywordList: kw,
+            categoria: e.category || '',
+            enabled: e.enabled !== false,
+            icon: e.icon || '',
+            key: e.key,
+            order: e.order ?? 0,
+            createdAt: e.createdAt || Date.now(),
+            updatedAt: e.updatedAt || Date.now()
+          };
+        });
+      database.knowledge = manual.concat(synced).sort((a, b) => (a.order ?? 9999) - (b.order ?? 9999));
+    }
+
+    async batchWrite(collection, items, mapFn, idFn) {
+      if (!items.length) return;
+      const { writeBatch, doc } = this.fb._modules;
+      const cid = this._cid();
+      for (let i = 0; i < items.length; i += 400) {
+        const batch = writeBatch(this.fb.db);
+        items.slice(i, i + 400).forEach((item, j) => {
+          const docId = idFn(item, i + j);
+          batch.set(doc(this.fb.db, `condominios/${cid}/${collection}`, docId), mapFn(item), { merge: true });
+        });
+        await batch.commit();
+      }
+    }
+
+    async getCloudCounts() {
+      const { getDocs } = this.fb._modules;
+      const [gadget, manual, tickets] = await Promise.all([
+        getDocs(this.fb.col('gadget_kb')),
+        getDocs(this.fb.col('knowledge_base')),
+        getDocs(this.fb.col('tickets'))
+      ]);
+      return { gadgetKB: gadget.size, manualKB: manual.size, tickets: tickets.size };
+    }
+
+    async ensureCondominioDoc(name) {
+      const { setDoc, getDoc } = this.fb._modules;
+      const id = this._cid();
+      const ref = this.fb.doc(`condominios/${id}`);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        await setDoc(ref, {
+          id,
+          nombre: name || 'Mi Condominio',
+          direccion: '',
+          administrador: '',
+          fechaCreacion: Date.now(),
+          publico: true
+        });
+      }
+    }
+
+    async syncSettings(settings) {
+      const { setDoc } = this.fb._modules;
+      await setDoc(this.fb.doc(`condominios/${this._cid()}/settings/main`), {
+        ...settings,
+        updatedAt: Date.now()
+      }, { merge: true });
+    }
+
+    async pushGadgetKB(entries) {
+      if (!entries?.length) return;
+      await this.batchWrite('gadget_kb', entries, (e) => ({ ...e, updatedAt: Date.now() }), (e) => e.id || e.key);
+    }
+
+    async pushManualKnowledge(knowledgeArr) {
+      const manual = (knowledgeArr || []).filter((k) => k.origin !== 'gadget');
+      if (!manual.length) return;
+      await this.batchWrite('knowledge_base', manual, (k) => this.mapManualToCloud(k), (k) => k.id);
+    }
+
+    async migrateTrainingDocuments(documents) {
+      if (!documents?.length) return;
+      await this.batchWrite('training_documents', documents, (d) => ({
+        nombreArchivo: d.name,
+        tipo: d.type || 'text/plain',
+        contenidoExtraido: d.content || d.text || '',
+        keywords: d.keywords || [],
+        fechaCarga: d.uploadedAt || Date.now()
+      }), (d) => d.id);
+    }
+
+    async migrateLocalToCloud(database) {
+      if (!this.fb.isEnabled()) return { ok: false };
+      await this.ensureCondominioDoc(database.settings?.buildingName);
+      await this.syncSettings(database.settings);
+
+      if (!database.manualKnowledge) {
+        database.manualKnowledge = (database.knowledge || []).filter((k) => k.origin !== 'gadget');
+      }
+
+      await this.batchWrite('tickets', (database.tickets || []).slice(0, 500), (t) => this.tickets.mapFromLocal(t), (t) => t.id);
+      await this.pushGadgetKB(database.gadgetKB || []);
+      await this.pushManualKnowledge(database.manualKnowledge || []);
+
+      if (global.IDBModule?.documentsCache?.length) {
+        await this.migrateTrainingDocuments(global.IDBModule.documentsCache);
+      }
+
+      localStorage.setItem(CLOUD_SYNC_KEY, String(Date.now()));
+      return { ok: true };
+    }
+
+    startRealtimeSync(database, onUpdate) {
+      this.stop();
+      if (!this.fb.isEnabled()) return;
+
+      const { onSnapshot } = this.fb._modules;
+
+      const unsubTickets = this.tickets.watchTickets((tickets) => {
+        database.tickets = tickets;
+        this._cacheLocal(database);
+        if (onUpdate) onUpdate('tickets');
+      });
+      this._unsubs.push(unsubTickets);
+
+      const settingsUnsub = onSnapshot(
+        this.fb.doc(`condominios/${this._cid()}/settings/main`),
+        (snap) => {
+          if (snap.exists()) {
+            database.settings = { ...database.settings, ...snap.data() };
+            this._cacheLocal(database);
+            if (onUpdate) onUpdate('settings');
+          }
+        }
+      );
+      this._unsubs.push(settingsUnsub);
+
+      const gadgetUnsub = onSnapshot(this.fb.col('gadget_kb'), (snap) => {
+        if (this._pushing) return;
+        this._syncing = true;
+        database.gadgetKB = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        this.applyUnifiedKnowledge(database);
+        this._cacheLocal(database);
+        this._syncing = false;
+        if (onUpdate) onUpdate('gadgetKB');
+      });
+      this._unsubs.push(gadgetUnsub);
+
+      const manualUnsub = onSnapshot(this.fb.col('knowledge_base'), (snap) => {
+        if (this._pushing) return;
+        this._syncing = true;
+        database.manualKnowledge = snap.docs.map((d) => this.mapManualFromCloud(d.id, d.data()));
+        this.applyUnifiedKnowledge(database);
+        this._cacheLocal(database);
+        this._syncing = false;
+        if (onUpdate) onUpdate('knowledge');
+      });
+      this._unsubs.push(manualUnsub);
+    }
+
+    _cacheLocal(database) {
+      if (this._syncing) return;
+      try {
+        localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
+      } catch (_) {}
+    }
+
+    stop() {
+      this._unsubs.forEach((fn) => { try { fn(); } catch (_) {} });
+      this._unsubs = [];
+    }
+  }
+
+  /* ─── UnifiedDataStore — único punto de persistencia local + nube ─── */
+  class UnifiedDataStore {
+    constructor(fb, sync) {
+      this.fb = fb;
+      this.sync = sync;
+    }
+
+    isCloud() {
+      return this.fb.isEnabled();
+    }
+
+    /** Guarda siempre en localStorage y replica a Firestore según scope */
+    async persist(database, scope = 'full') {
+      if (!database.manualKnowledge) {
+        database.manualKnowledge = (database.knowledge || []).filter((k) => k.origin !== 'gadget');
+      }
+      localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
+      if (!this.fb.isEnabled() || this.sync._syncing) return;
+
+      this.sync._pushing = true;
+      try {
+        if (scope === 'full' || scope === 'settings') {
+          await this.sync.syncSettings(database.settings);
+        }
+        if (scope === 'full' || scope === 'gadgetKB') {
+          await this.sync.pushGadgetKB(database.gadgetKB || []);
+        }
+        if (scope === 'full' || scope === 'knowledge') {
+          await this.sync.pushManualKnowledge(database.manualKnowledge || []);
+        }
+      } catch (err) {
+        console.warn('[DataStore] persist cloud:', err);
+      } finally {
+        this.sync._pushing = false;
+      }
+    }
+
+    /** Al conectar: sube local vacío en nube, o baja nube si local está vacío */
+    async bootstrap(database, callbacks = {}) {
+      if (!this.fb.isEnabled()) return { mode: 'local' };
+
+      await this.sync.ensureCondominioDoc(database.settings?.buildingName);
+
+      if (!database.manualKnowledge) {
+        database.manualKnowledge = (database.knowledge || []).filter((k) => k.origin !== 'gadget');
+      }
+
+      const counts = await this.sync.getCloudCounts();
+      const localGadget = database.gadgetKB?.length || 0;
+      const localManual = database.manualKnowledge?.length || 0;
+      let migrated = false;
+
+      const cloudEmpty = counts.gadgetKB === 0 && counts.manualKB === 0;
+      const localHasData = localGadget > 0 || localManual > 0;
+
+      if (cloudEmpty && localHasData) {
+        await this.sync.migrateLocalToCloud(database);
+        migrated = true;
+        global.toast?.('Conocimiento local migrado a la nube', 'success');
+      } else if (!cloudEmpty && localGadget === 0 && localManual === 0) {
+        migrated = false;
+      } else if (localHasData && !localStorage.getItem(CLOUD_SYNC_KEY)) {
+        await this.sync.migrateLocalToCloud(database);
+        migrated = true;
+      }
+
+      this.sync.applyUnifiedKnowledge(database);
+      localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
+
+      this.sync.startRealtimeSync(database, async (type) => {
+        if (type === 'gadgetKB' || type === 'knowledge') {
+          this.sync.applyUnifiedKnowledge(database);
+          if (typeof global.RAGModule !== 'undefined') {
+            await global.RAGModule.rebuildIndex();
+          }
+        }
+        if (callbacks.onSync) callbacks.onSync(type);
+      });
+
+      return { mode: 'cloud', migrated, counts };
+    }
+
+    async forceMigrate(database) {
+      return this.sync.migrateLocalToCloud(database);
+    }
+  }
+
+  /* ─── UIManager (Firebase) ─── */
+  class UIManager {
+    static setCloudBadge(connected, text) {
+      const el = document.getElementById('cloudStatusBadge');
+      if (!el) return;
+      el.textContent = text || (connected ? 'Cloud conectado' : 'Modo local');
+      el.className = 'cloud-badge ' + (connected ? 'cloud-on' : 'cloud-off');
+    }
+
+    static bindFirebaseConfigForm(fb, onSaved) {
+      const form = document.getElementById('firebaseConfigForm');
+      if (!form) return;
+      const cfg = fb.loadConfig() || fb.getDefaultConfig();
+      const fieldMap = {
+        fbApiKey: 'apiKey',
+        fbAuthDomain: 'authDomain',
+        fbProjectId: 'projectId',
+        fbStorageBucket: 'storageBucket',
+        fbMessagingSenderId: 'messagingSenderId',
+        fbAppId: 'appId',
+        fbCondominioId: 'condominioId'
+      };
+      Object.entries(fieldMap).forEach(([id, key]) => {
+        const el = document.getElementById(id);
+        if (el) el.value = cfg[key] || '';
+      });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const config = {
+          apiKey: document.getElementById('fbApiKey').value.trim(),
+          authDomain: document.getElementById('fbAuthDomain').value.trim(),
+          projectId: document.getElementById('fbProjectId').value.trim(),
+          storageBucket: document.getElementById('fbStorageBucket').value.trim(),
+          messagingSenderId: document.getElementById('fbMessagingSenderId').value.trim(),
+          appId: document.getElementById('fbAppId').value.trim(),
+          condominioId: document.getElementById('fbCondominioId').value.trim() || document.getElementById('fbProjectId').value.trim()
+        };
+        try {
+          await fb.init(config);
+          await fb.testConnection();
+          if (onSaved) await onSaved(config);
+          UIManager.setCloudBadge(true);
+          global.toast?.('Firebase conectado correctamente', 'success');
+        } catch (err) {
+          global.toast?.('Error Firebase: ' + err.message, 'error');
+        }
+      });
+
+      document.getElementById('btnTestFirebase')?.addEventListener('click', async () => {
+        try {
+          const config = {
+            apiKey: document.getElementById('fbApiKey').value.trim(),
+            authDomain: document.getElementById('fbAuthDomain').value.trim(),
+            projectId: document.getElementById('fbProjectId').value.trim(),
+            storageBucket: document.getElementById('fbStorageBucket').value.trim(),
+            messagingSenderId: document.getElementById('fbMessagingSenderId').value.trim(),
+            appId: document.getElementById('fbAppId').value.trim(),
+            condominioId: document.getElementById('fbCondominioId').value.trim()
+          };
+          await fb.init(config);
+          await fb.testConnection();
+          global.toast?.('Conexión Firebase OK', 'success');
+        } catch (err) {
+          global.toast?.('Fallo de conexión: ' + err.message, 'error');
+        }
+      });
+
+      document.getElementById('btnMigrateCloud')?.addEventListener('click', async () => {
+        if (!global.database || !global.ArturitoCloud?.store) return;
+        try {
+          await global.ArturitoCloud.store.forceMigrate(global.database);
+          global.toast?.('Conocimiento y datos locales sincronizados con la nube', 'success');
+        } catch (err) {
+          global.toast?.('Error migración: ' + err.message, 'error');
+        }
+      });
+    }
+  }
+
+  /* ─── Bootstrap ─── */
+  const fb = FirebaseManager.getInstance();
+  const auth = new AuthManager(fb);
+  const storage = new StorageManager(fb);
+  const knowledge = new KnowledgeManager(fb);
+  const notifications = new NotificationManager(fb, auth);
+  const tickets = new CloudTicketManager(fb, storage, notifications);
+  const training = new TrainingManagerFB(fb, storage);
+  const sync = new CloudSyncBridge(fb, auth, tickets, knowledge);
+  const store = new UnifiedDataStore(fb, sync);
+  const chatbot = new ChatbotManager(knowledge, tickets);
+
+  global.ArturitoCloud = {
+    ROLES,
+    STAFF_ROLES,
+    CONFIDENCE_THRESHOLD,
+    DEFAULT_FIREBASE_CONFIG,
+    LOCAL_DB_KEY,
+    fb,
+    auth,
+    storage,
+    knowledge,
+    notifications,
+    tickets,
+    training,
+    sync,
+    store,
+    chatbot,
+    DashboardManager,
+    UIManager,
+    async init(options = {}) {
+      let hasConfig = await fb.initFromStorage();
+      if (!hasConfig) {
+        UIManager.setCloudBadge(false, 'Modo local');
+        return false;
+      }
+      try {
+        await auth.init(options.onAuthChange);
+        if (options.database) {
+          await store.bootstrap(options.database, { onSync: options.onSync });
+        }
+        UIManager.setCloudBadge(true, 'Firebase · ' + fb.getCondominioId());
+        return true;
+      } catch (err) {
+        console.warn('[ArturitoCloud] init:', err);
+        UIManager.setCloudBadge(false, 'Error Firebase');
+        return false;
+      }
+    }
+  };
+
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
 </head>
 <body class="mode-client">
 <!-- ═══ PORTAL RESIDENTE (público) ═══ -->
@@ -5945,6 +7108,36 @@ const NavModule = {
   }
 };
 
+
+/** Registra Service Worker embebido (PWA monolítica) */
+function registerArturitoServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  var scope = location.pathname.replace(/[^/]*$/, '') || '/';
+  var swCode = [
+    "const CACHE_NAME='arturito-ai-v4';",
+    "self.addEventListener('install',function(e){",
+    "var SCOPE=self.registration.scope;",
+    "var OFFLINE=[SCOPE,new URL('index.html',SCOPE).href,",
+    "'https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap',",
+    "'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'];",
+    "e.waitUntil(caches.open(CACHE_NAME).then(function(c){return c.addAll(OFFLINE.filter(Boolean));}).catch(function(){}));",
+    "self.skipWaiting();});",
+    "self.addEventListener('activate',function(e){",
+    "e.waitUntil(caches.keys().then(function(k){return Promise.all(k.filter(function(x){return x!==CACHE_NAME;}).map(function(x){return caches.delete(x);}));}));",
+    "self.clients.claim();});",
+    "self.addEventListener('fetch',function(e){",
+    "if(e.request.method!=='GET')return;",
+    "var u=new URL(e.request.url);",
+    "if(u.origin.indexOf('googleapis.com')>-1||u.origin.indexOf('gstatic.com')>-1||u.origin.indexOf('cdnjs.cloudflare.com')>-1){",
+    "e.respondWith(fetch(e.request).catch(function(){return caches.match(e.request);}));return;}",
+    "var fb=new URL('index.html',self.registration.scope).href;",
+    "e.respondWith(caches.match(e.request).then(function(c){return c||fetch(e.request).catch(function(){return caches.match(fb);});}));",
+    "});"
+  ].join('');
+  var blob = new Blob([swCode], { type: 'application/javascript' });
+  navigator.serviceWorker.register(URL.createObjectURL(blob), { scope: scope }).catch(function(){});
+}
+
 /* ─── App — Orquestador principal ─── */
 const App = {
   mode: 'client',
@@ -6014,6 +7207,10 @@ const App = {
       } catch (_) {
         ArturitoCloud.UIManager.setCloudBadge(false, 'Modo local');
       }
+    } else {
+      const badge = document.getElementById('cloudStatusBadge');
+      if (badge) { badge.textContent = 'Modo local'; badge.className = 'cloud-badge cloud-off'; }
+      console.warn('[Arturito] capa Firebase embebida no disponible');
     }
 
     window.TicketModule = TicketModule;
@@ -6027,11 +7224,10 @@ const App = {
     if (purgedPilot) toast('Datos de prueba piloto eliminados de la memoria local', 'info');
     if (repairedKB) toast('Base de conocimiento restaurada desde la semilla original', 'success');
 
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('../sw.js').catch(() => {});
-    }
+    registerArturitoServiceWorker();
 
-    console.log('ARTURITO AI — Modo:', this.mode, '| Cloud:', ArturitoCloud?.fb?.isEnabled?.() || false, '| Temas indexados:', RAGModule.index.length);
+    const cloudOn = typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled?.();
+    console.log('ARTURITO AI — Modo:', this.mode, '| Cloud:', cloudOn || false, '| Temas indexados:', RAGModule.index.length);
   },
   /** Refresca vistas administrativas */
   refresh() {
