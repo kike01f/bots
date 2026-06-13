@@ -668,7 +668,25 @@ body.mode-client #adminApp{display:none!important}
 </style>
 <script>
 (function(){
-  var manifest = {"name":"ARTURITO AI","short_name":"Arturito","description":"Asistente inteligente para administración de condominios","start_url":".","scope":".","display":"standalone","background_color":"#0f172a","theme_color":"#7FBA02","orientation":"portrait-primary","icons":[{"src":"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%237FBA02'/%3E%3Ctext x='32' y='42' text-anchor='middle' fill='white' font-size='28' font-family='sans-serif' font-weight='700'%3EA%3C/text%3E%3C/svg%3E","sizes":"192x192","type":"image/svg+xml","purpose":"any maskable"}]};
+  var startUrl = location.href.split('#')[0].split('?')[0];
+  var scopeUrl = new URL('./', startUrl).href;
+  var manifest = {
+    name: 'ARTURITO AI',
+    short_name: 'Arturito',
+    description: 'Asistente inteligente para administración de condominios',
+    start_url: startUrl,
+    scope: scopeUrl,
+    display: 'standalone',
+    background_color: '#0f172a',
+    theme_color: '#7FBA02',
+    orientation: 'portrait-primary',
+    icons: [{
+      src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%237FBA02'/%3E%3Ctext x='32' y='42' text-anchor='middle' fill='white' font-size='28' font-family='sans-serif' font-weight='700'%3EA%3C/text%3E%3C/svg%3E",
+      sizes: '192x192',
+      type: 'image/svg+xml',
+      purpose: 'any maskable'
+    }]
+  };
   var link = document.createElement('link');
   link.rel = 'manifest';
   link.href = URL.createObjectURL(new Blob([JSON.stringify(manifest)], { type: 'application/json' }));
@@ -7520,7 +7538,7 @@ const App = {
     const repairedKB = boot?.repaired;
     await IDBModule.init();
 
-    global.KnowledgeBaseModule = KnowledgeBaseModule;
+    window.KnowledgeBaseModule = KnowledgeBaseModule;
 
     const cloudHandlers = {
       onSync: (type) => { void App.applyCloudUpdate(type); },
