@@ -654,9 +654,25 @@ body.mode-client #adminApp{display:none!important}
 .analysis-tags{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.25rem}
 .analysis-tag{font-size:.72rem;padding:.15rem .45rem;border-radius:99px;background:color-mix(in srgb,var(--primary) 10%,transparent);color:var(--primary)}
 .doc-group-header{padding:.65rem .85rem;background:color-mix(in srgb,var(--primary) 6%,transparent);border-radius:var(--radius-sm);margin:1rem 0 .65rem;font-weight:600;font-size:.85rem;display:flex;align-items:center;justify-content:space-between;gap:.5rem}
-.kb-gadget-entry{border:1px solid var(--border);border-radius:var(--radius-sm);padding:.85rem;margin-bottom:.65rem;background:var(--bg-card)}
+.kb-gadget-entry{border:1px solid var(--border);border-radius:var(--radius-sm);padding:.85rem;margin-bottom:.65rem;background:var(--bg-card);display:flex;gap:.65rem;align-items:flex-start;transition:box-shadow .15s,border-color .15s,opacity .15s}
 .kb-gadget-entry.disabled{opacity:.55}
+.kb-gadget-entry.dragging{opacity:.45}
+.kb-gadget-entry.drag-over{border-color:var(--primary);box-shadow:0 0 0 2px color-mix(in srgb,var(--primary) 35%,transparent)}
+.kb-gadget-entry-main{flex:1;min-width:0}
 .kb-gadget-entry-header{display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem;margin-bottom:.45rem}
+.kb-gadget-drag-handle{cursor:grab;color:var(--text-muted);font-size:1.1rem;line-height:1;padding:.35rem .25rem;user-select:none;touch-action:none;flex-shrink:0;margin-top:.1rem}
+.kb-gadget-drag-handle:active{cursor:grabbing}
+.kb-gadget-order-col{display:flex;flex-direction:column;gap:.2rem;flex-shrink:0}
+.kb-gadget-order-col button{width:28px;height:24px;padding:0;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-muted);cursor:pointer;font-size:.75rem;line-height:1;display:flex;align-items:center;justify-content:center}
+.kb-gadget-order-col button:hover:not(:disabled){border-color:var(--primary);color:var(--primary)}
+.kb-gadget-order-col button:disabled{opacity:.35;cursor:not-allowed}
+.kb-gadget-cat-list{min-height:8px}
+.kb-sort-list{display:flex;flex-direction:column;gap:.45rem;margin:.75rem 0 1rem}
+.kb-sort-item{display:flex;align-items:center;gap:.5rem;padding:.55rem .65rem;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card);cursor:grab;user-select:none}
+.kb-sort-item.dragging{opacity:.5}
+.kb-sort-item.drag-over{border-color:var(--primary)}
+.kb-sort-item-handle{color:var(--text-muted);font-size:1rem;line-height:1}
+.kb-sort-item-label{flex:1;font-size:.85rem;font-weight:500}
 .kb-gadget-entry-title{font-weight:600;font-size:.9rem;display:flex;align-items:center;gap:.4rem}
 .kb-gadget-entry-meta{font-size:.72rem;color:var(--text-muted);margin-bottom:.35rem}
 .kb-gadget-entry-preview{font-size:.8rem;color:var(--text);line-height:1.4;max-height:4.2em;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
@@ -912,7 +928,7 @@ body.mode-client #adminApp{display:none!important}
                 <button class="btn btn-primary btn-sm" id="btnNewGadgetKB">+ Nuevo tema</button>
               </div>
             </div>
-            <p style="font-size:.82rem;color:var(--text-muted);margin:-.5rem 0 1rem">Temas del reglamento y servicios del edificio. Se sincronizan automáticamente con la <strong>base manual</strong> que usa Arturito en el chat.</p>
+            <p style="font-size:.82rem;color:var(--text-muted);margin:-.5rem 0 1rem">Temas del reglamento y servicios del edificio. <strong>Arrastra</strong> o usa ↑↓ para definir el orden en el menú del chat. Se sincronizan con la base manual.</p>
             <div class="toolbar">
               <div class="search-box"><input type="text" id="gadgetKBSearch" placeholder="Buscar temas, palabras clave..."></div>
               <select id="gadgetKBFilterCat" style="min-width:200px"><option value="">Todas las categorías</option></select>
@@ -979,10 +995,12 @@ body.mode-client #adminApp{display:none!important}
             <div class="card-title" style="margin-bottom:1rem">Mensajes y comportamiento del chatbot</div>
             <form id="chatContentForm" class="form-grid">
               <div class="form-group full"><label>Mensaje de bienvenida</label><textarea id="ccWelcome" rows="3"></textarea></div>
-              <div class="form-group full"><label>Preguntas rápidas <span style="font-weight:400;color:var(--text-muted)">(una por línea)</span></label><textarea id="ccQuickQuestions" rows="5"></textarea></div>
+              <div class="form-group full"><label>Preguntas rápidas <span style="font-weight:400;color:var(--text-muted)">(arrastra para reordenar la barra del chat)</span></label><div id="chatQuickQuestionsSort" class="kb-sort-list"></div><textarea id="ccQuickQuestions" rows="3" style="margin-top:.5rem;font-size:.78rem" placeholder="También puedes editar aquí, una por línea"></textarea></div>
               <div class="form-group full" style="margin-top:.5rem;padding-top:1rem;border-top:1px dashed var(--border)">
                 <div style="font-weight:700;margin-bottom:.5rem;font-size:.92rem">Menú de temas del chat</div>
-                <p style="font-size:.8rem;color:var(--text-muted);margin:0 0 .75rem">Los temas y categorías se editan en la pestaña <strong>Base Gadget</strong>. Aquí configuras cómo se muestra el menú al residente.</p>
+                <p style="font-size:.8rem;color:var(--text-muted);margin:0 0 .75rem">Orden de <strong>categorías</strong> (arrastra). El orden de cada tema se define en la pestaña <strong>Base Gadget</strong>.</p>
+                <label style="font-size:.8rem;font-weight:500;color:var(--text-muted);display:block;margin-bottom:.35rem">Orden de categorías en el chat</label>
+                <div id="chatCategoryOrderList" class="kb-sort-list"></div>
               </div>
               <div class="form-group full"><label>Texto introductorio del menú de temas</label><textarea id="ccTopicsIntro" rows="2" placeholder="Aquí tienes todos los temas organizados por categoría..."></textarea></div>
               <div class="form-group full"><label style="display:flex;align-items:center;gap:.5rem;font-weight:600;cursor:pointer"><input type="checkbox" id="ccShowTopicsWelcome" checked> Mostrar menú de temas al iniciar una conversación nueva</label></div>
@@ -2877,7 +2895,7 @@ const ARTURITO_GADGET_KB_SEED = [
     'buildingName', 'logo', 'primaryColor', 'secondaryColor', 'botName',
     'welcomeMessage', 'portalTagline', 'portalHint', 'theme',
     'quickQuestions', 'topicsMenuIntro', 'showTopicsOnWelcome',
-    'chatShortcuts', 'chatMessages', 'gadgetCategories', 'updatedAt'
+    'chatShortcuts', 'chatMessages', 'gadgetCategories', 'gadgetCategoryOrder', 'updatedAt'
   ];
 
   class CloudSyncBridge {
@@ -3159,6 +3177,7 @@ const ARTURITO_GADGET_KB_SEED = [
         chatShortcuts: Array.isArray(s.chatShortcuts) ? s.chatShortcuts.map((x) => ({ ...x })) : [],
         chatMessages: s.chatMessages ? { ...s.chatMessages } : {},
         gadgetCategories: s.gadgetCategories ? JSON.parse(JSON.stringify(s.gadgetCategories)) : {},
+        gadgetCategoryOrder: Array.isArray(s.gadgetCategoryOrder) ? s.gadgetCategoryOrder.slice() : [],
         updatedAt: Date.now()
       };
       return JSON.parse(JSON.stringify(payload));
@@ -5043,8 +5062,68 @@ const GadgetKBModule = {
     return typeof ARTURITO_GADGET_CATEGORIES !== 'undefined' ? ARTURITO_GADGET_CATEGORIES : {};
   },
 
+  /** Claves de categoría en el orden del menú del chat */
+  getCategoryKeys() {
+    const cats = this.getCategories();
+    const keys = Object.keys(cats);
+    const order = database.settings?.gadgetCategoryOrder;
+    if (!Array.isArray(order) || !order.length) return keys;
+    const sorted = order.filter(k => keys.includes(k));
+    keys.forEach(k => { if (!sorted.includes(k)) sorted.push(k); });
+    return sorted;
+  },
+
   getEntries() {
     return (database.gadgetKB || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+  },
+
+  /** Aplica orden global de temas (0…n) y guarda en nube */
+  async applyTopicOrder(orderedIds) {
+    const ids = orderedIds.filter(Boolean);
+    ids.forEach((id, i) => {
+      const idx = database.gadgetKB.findIndex(e => e.id === id);
+      if (idx >= 0) database.gadgetKB[idx].order = i;
+    });
+    database.gadgetKB.sort((a, b) => (a.order || 0) - (b.order || 0));
+    KnowledgeBaseModule.syncFromGadget();
+    return DatabaseModule.save('gadgetKB', { gadget: { changedIds: ids } });
+  },
+
+  async reorderWithinCategory(category, orderedIdsInCategory) {
+    const all = this.getEntries();
+    const catIds = all.filter(e => e.category === category).map(e => e.id);
+    if (!orderedIdsInCategory.every(id => catIds.includes(id))) return null;
+    const firstIdx = all.findIndex(e => e.category === category);
+    const lastIdx = all.map((e, i) => e.category === category ? i : -1).filter(i => i >= 0).pop();
+    if (firstIdx < 0) return null;
+    const before = all.slice(0, firstIdx).map(e => e.id);
+    const after = all.slice(lastIdx + 1).map(e => e.id);
+    return this.applyTopicOrder([...before, ...orderedIdsInCategory, ...after]);
+  },
+
+  async moveTopic(id, direction) {
+    const all = this.getEntries();
+    const entry = all.find(e => e.id === id);
+    if (!entry) return null;
+    const catIds = all.filter(e => e.category === entry.category).map(e => e.id);
+    const idx = catIds.indexOf(id);
+    const newIdx = idx + direction;
+    if (newIdx < 0 || newIdx >= catIds.length) return null;
+    const next = catIds.slice();
+    [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
+    return this.reorderWithinCategory(entry.category, next);
+  },
+
+  async setCategoryOrder(orderedKeys) {
+    database.settings.gadgetCategoryOrder = orderedKeys.filter(Boolean);
+    database.settings.updatedAt = Date.now();
+    return DatabaseModule.save('settings');
+  },
+
+  async setQuickQuestionsOrder(questions) {
+    database.settings.quickQuestions = questions.filter(q => String(q).trim());
+    database.settings.updatedAt = Date.now();
+    return DatabaseModule.save('settings');
   },
 
   normalizeText(text) {
@@ -5160,12 +5239,14 @@ const GadgetKBModule = {
     return (database.gadgetKB || []).find(e => e.key === key && e.enabled !== false);
   },
 
-  /** Genera HTML del menú de temas por categorías (estilo Arturito Gadget) */
+  /** Genera HTML del menú de temas por categorías (respeta order y orden de categorías) */
   generateTopicsMenuHTML() {
     const cats = this.getCategories();
     const entries = this.getEntries().filter(e => e.enabled !== false);
     let html = '<div class="topics-menu-wrap">';
-    Object.entries(cats).forEach(([catKey, catInfo]) => {
+    this.getCategoryKeys().forEach((catKey) => {
+      const catInfo = cats[catKey];
+      if (!catInfo) return;
       const categoryTopics = entries.filter(e => e.category === catKey);
       if (!categoryTopics.length) return;
       html += `<div class="category-container" data-category="${escapeHtml(catKey)}">`;
@@ -6851,8 +6932,16 @@ const TrainingModule = {
     });
     container.innerHTML = Object.entries(groups).map(([catKey, items]) => {
       const cat = cats[catKey] || { name: catKey };
-      return `<div class="doc-group-header"><span>${escapeHtml(cat.name)}</span><span style="font-size:.72rem;color:var(--text-muted)">${items.length} tema(s)</span></div>` +
-        items.map(e => `<div class="kb-gadget-entry${e.enabled === false ? ' disabled' : ''}">
+      const sortedItems = items.slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+      return `<div class="doc-group-header"><span>${escapeHtml(cat.name)}</span><span style="font-size:.72rem;color:var(--text-muted)">${sortedItems.length} tema(s) · arrastra para ordenar</span></div>` +
+        `<div class="kb-gadget-cat-list" data-cat-list="${escapeHtml(catKey)}">` +
+        sortedItems.map((e, i) => `<div class="kb-gadget-entry${e.enabled === false ? ' disabled' : ''}" draggable="true" data-id="${escapeHtml(e.id)}" data-category="${escapeHtml(catKey)}">
+          <span class="kb-gadget-drag-handle" title="Arrastrar para reordenar">⠿</span>
+          <div class="kb-gadget-order-col">
+            <button type="button" title="Subir" ${i === 0 ? 'disabled' : ''} onclick="TrainingModule.moveGadgetTopic('${e.id}',-1)">↑</button>
+            <button type="button" title="Bajar" ${i === sortedItems.length - 1 ? 'disabled' : ''} onclick="TrainingModule.moveGadgetTopic('${e.id}',1)">↓</button>
+          </div>
+          <div class="kb-gadget-entry-main">
           <div class="kb-gadget-entry-header">
             <div class="kb-gadget-entry-title">${escapeHtml(e.title)}</div>
             <div style="display:flex;gap:.3rem;flex-shrink:0">
@@ -6860,11 +6949,103 @@ const TrainingModule = {
               ${actionBtn('trash', `TrainingModule.removeGadgetKB('${e.id}')`, 'Eliminar', true)}
             </div>
           </div>
-          <div class="kb-gadget-entry-meta">${e.enabled === false ? 'Desactivado · ' : ''}${(e.keywords || []).length} palabras clave</div>
+          <div class="kb-gadget-entry-meta">${e.enabled === false ? 'Desactivado · ' : ''}#${(e.order ?? 0) + 1} · ${(e.keywords || []).length} palabras clave</div>
           <div class="kb-gadget-entry-preview">${escapeHtml(String(e.response || '').substring(0, 220))}</div>
           <div class="kb-gadget-keywords">${(e.keywords || []).slice(0, 8).map(k => `<span class="kb-gadget-kw">${escapeHtml(k)}</span>`).join('')}${(e.keywords||[]).length > 8 ? '<span class="kb-gadget-kw">+' + ((e.keywords||[]).length - 8) + '</span>' : ''}</div>
-        </div>`).join('');
+          </div>
+        </div>`).join('') +
+        `</div>`;
     }).join('');
+    this.bindGadgetKBReorder();
+  },
+  async moveGadgetTopic(id, dir) {
+    const r = await GadgetKBModule.moveTopic(id, dir);
+    if (r?.cloud === false && r?.reason !== 'syncing') toast('Orden guardado localmente; se sincronizará en la nube al reconectar.', 'warning');
+    this.renderGadgetKB();
+    this.refreshChatTopicOrder();
+  },
+  refreshChatTopicOrder() {
+    ChatModule.applyLiveSettings();
+    const conv = ChatModule.getCurrent();
+    if (conv?.messages?.some(m => m.topicsMenu)) ChatModule.renderMessages();
+  },
+  bindGadgetKBReorder() {
+    const container = document.getElementById('gadgetKBGrouped');
+    if (!container || container.dataset.reorderBound) return;
+    container.dataset.reorderBound = '1';
+    let dragId = null;
+    container.addEventListener('dragstart', (e) => {
+      const entry = e.target.closest('.kb-gadget-entry[draggable]');
+      if (!entry || e.target.closest('button')) { e.preventDefault(); return; }
+      dragId = entry.dataset.id;
+      entry.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', dragId);
+    });
+    container.addEventListener('dragend', () => {
+      container.querySelectorAll('.kb-gadget-entry').forEach(el => el.classList.remove('dragging', 'drag-over'));
+      dragId = null;
+    });
+    container.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      const entry = e.target.closest('.kb-gadget-entry');
+      if (!entry || entry.dataset.id === dragId) return;
+      container.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+      entry.classList.add('drag-over');
+    });
+    container.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      const target = e.target.closest('.kb-gadget-entry');
+      if (!target || !dragId || target.dataset.id === dragId) return;
+      const cat = target.dataset.category;
+      const list = container.querySelector(`[data-cat-list="${catKey}"]`);
+      if (!list) return;
+      const ids = [...list.querySelectorAll('.kb-gadget-entry')].map(el => el.dataset.id);
+      const fromIdx = ids.indexOf(dragId);
+      const toIdx = ids.indexOf(target.dataset.id);
+      if (fromIdx < 0 || toIdx < 0) return;
+      ids.splice(fromIdx, 1);
+      ids.splice(toIdx, 0, dragId);
+      await GadgetKBModule.reorderWithinCategory(cat, ids);
+      toast('Orden del menú del chat actualizado', 'success');
+      this.renderGadgetKB();
+      this.refreshChatTopicOrder();
+    });
+  },
+  /** Lista ordenable genérica */
+  bindSortableList(listEl, onReorder) {
+    if (!listEl || listEl.dataset.sortBound) return;
+    listEl.dataset.sortBound = '1';
+    let dragKey = null;
+    listEl.addEventListener('dragstart', (e) => {
+      const item = e.target.closest('.kb-sort-item[draggable]');
+      if (!item) return;
+      dragKey = item.dataset.sortKey;
+      item.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    listEl.addEventListener('dragend', () => {
+      listEl.querySelectorAll('.kb-sort-item').forEach(el => el.classList.remove('dragging', 'drag-over'));
+      dragKey = null;
+    });
+    listEl.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      const item = e.target.closest('.kb-sort-item');
+      if (!item || item.dataset.sortKey === dragKey) return;
+      listEl.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+      item.classList.add('drag-over');
+    });
+    listEl.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      const target = e.target.closest('.kb-sort-item');
+      if (!target || !dragKey || target.dataset.sortKey === dragKey) return;
+      const keys = [...listEl.querySelectorAll('.kb-sort-item')].map(el => el.dataset.sortKey);
+      const fromIdx = keys.indexOf(dragKey);
+      const toIdx = keys.indexOf(target.dataset.sortKey);
+      keys.splice(fromIdx, 1);
+      keys.splice(toIdx, 0, dragKey);
+      await onReorder(keys);
+    });
   },
   openCreateGadgetKB() {
     document.getElementById('gadgetKBModalTitle').textContent = 'Nuevo Tema — Base Gadget';
@@ -6907,6 +7088,7 @@ const TrainingModule = {
     this.renderGadgetKB();
     this.renderManual();
     this.renderStats();
+    this.refreshChatTopicOrder();
     if (document.body.classList.contains('mode-client') && ChatModule.getCurrent()) ChatModule.renderMessages();
     toast('Tema Gadget guardado — sincronizado con la base manual', 'success');
   },
@@ -7170,6 +7352,44 @@ const TrainingModule = {
     document.getElementById('ccEscalate').value = cm.escalate || DEFAULT_CHAT_MESSAGES.escalate;
     document.getElementById('ccTicketPrompt').value = cm.ticketPrompt || DEFAULT_CHAT_MESSAGES.ticketPrompt;
     document.getElementById('ccNoTickets').value = cm.noTickets || DEFAULT_CHAT_MESSAGES.noTickets;
+    this.renderCategoryOrderList();
+    this.renderQuickQuestionsSort();
+  },
+  renderCategoryOrderList() {
+    const el = document.getElementById('chatCategoryOrderList');
+    if (!el) return;
+    const cats = GadgetKBModule.getCategories();
+    const keys = GadgetKBModule.getCategoryKeys();
+    el.innerHTML = keys.map(k => {
+      const c = cats[k] || { name: k, icon: '' };
+      return `<div class="kb-sort-item" draggable="true" data-sort-key="${escapeHtml(k)}"><span class="kb-sort-item-handle">⠿</span><span class="kb-sort-item-label">${escapeHtml(String(c.icon || '') + ' ' + c.name).trim()}</span></div>`;
+    }).join('');
+    delete el.dataset.sortBound;
+    this.bindSortableList(el, async (orderedKeys) => {
+      await GadgetKBModule.setCategoryOrder(orderedKeys);
+      toast('Orden de categorías actualizado en el chat', 'success');
+      this.refreshChatTopicOrder();
+      this.renderCategoryOrderList();
+    });
+  },
+  renderQuickQuestionsSort() {
+    const el = document.getElementById('chatQuickQuestionsSort');
+    if (!el) return;
+    const qs = getQuickQuestions();
+    el.innerHTML = qs.map((q, i) =>
+      `<div class="kb-sort-item" draggable="true" data-sort-key="${i}"><span class="kb-sort-item-handle">⠿</span><span class="kb-sort-item-label">${escapeHtml(q)}</span></div>`
+    ).join('');
+    delete el.dataset.sortBound;
+    const snapshot = qs.slice();
+    this.bindSortableList(el, async (orderedIdx) => {
+      const reordered = orderedIdx.map(i => snapshot[parseInt(i, 10)]).filter(Boolean);
+      await GadgetKBModule.setQuickQuestionsOrder(reordered);
+      ChatModule.renderQuickQuestions();
+      const ta = document.getElementById('ccQuickQuestions');
+      if (ta) ta.value = reordered.join('\n');
+      toast('Orden de preguntas rápidas actualizado', 'success');
+      this.renderQuickQuestionsSort();
+    });
   },
   /** Guarda contenido editable del chatbot */
   async saveChatContent(e) {
