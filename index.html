@@ -404,6 +404,9 @@ body.mode-client #adminApp{display:none!important}
 .chat-msg-body a.topic-link{cursor:pointer;display:inline-flex;align-items:center;gap:.35rem;padding:.2rem .35rem;border-radius:5px;text-decoration:none;color:#374151;font-size:.78rem;font-weight:500;border-bottom:none;transition:all .2s ease;margin:.1rem 0}
 .chat-msg-body a.topic-link:hover{background:rgba(127,186,2,.12);color:var(--arturito-green-dark);transform:translateX(3px)}
 .chat-msg-body .topic-icon{font-size:.85rem;line-height:1}
+.chat-msg-body .topic-suggestions-wrap{margin-top:.65rem;display:flex;flex-direction:column;gap:.35rem}
+.chat-msg-body .topic-suggestion-item a.topic-link{width:100%;padding:.45rem .55rem;background:rgba(127,186,2,.06);border:1px solid rgba(127,186,2,.18);border-radius:8px;font-size:.8rem}
+.chat-msg-body .topic-suggestion-item a.topic-link:hover{background:rgba(127,186,2,.14);border-color:rgba(127,186,2,.35)}
 
 .chat-dock .typing-indicator{display:none;align-self:flex-start;margin:0 .75rem .45rem;padding:.5rem .75rem;background:#f9fafb;border-radius:16px 16px 16px 4px;border:1px solid rgba(148,163,184,.25);box-shadow:0 4px 16px rgba(0,0,0,.06);gap:5px;align-items:center;flex-shrink:0}
 .chat-dock .typing-indicator.show{display:flex}
@@ -5658,6 +5661,22 @@ const GadgetKBModule = {
     return html;
   },
 
+  /** Lista compacta de temas sugeridos (clicables en el chat) */
+  generateSuggestionsHTML(items) {
+    if (!items?.length) return '';
+    let html = '<div class="topic-suggestions-wrap">';
+    items.forEach((item) => {
+      const id = item.id || item.entryId || '';
+      const q = item.question || item.title || '';
+      html += '<div class="topic-suggestion-item">';
+      html += `<a href="#" class="topic-link" data-entry-id="${escapeHtml(id)}" data-question="${escapeHtml(q)}">`;
+      html += `<span class="topic-icon">${escapeHtml(item.icon || '💡')}</span>`;
+      html += `<span class="topic-title">${escapeHtml(item.title || q)}</span></a></div>`;
+    });
+    html += '</div>';
+    return html;
+  },
+
   exportJSON() {
     const blob = new Blob([JSON.stringify(database.gadgetKB, null, 2)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
@@ -5797,10 +5816,10 @@ const KnowledgeBaseModule = {
     return best;
   },
 
-  searchRelated(query, excludeTitle, limit = 3) {
+  searchRelated(query, excludeTitle, limit = 5) {
     return this.getEnabled()
       .map(entry => ({ entry, ...this.scoreEntry(entry, query) }))
-      .filter(x => x.score > 0.12 && x.entry.pregunta !== excludeTitle)
+      .filter(x => x.score > 0.06 && x.entry.pregunta !== excludeTitle)
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
   },
@@ -6487,9 +6506,89 @@ const ResponseEngine = {
     return best;
   },
 
-  /** Busca temas relacionados cuando la confianza es baja */
-  findRelatedTopics(query, excludeTitle) {
-    return KnowledgeBaseModule.searchRelated(query, excludeTitle, 3);
+  /** Busca temas relacionados cuando la confianza es baja o no hay respuesta */
+  findRelatedTopics(query, excludeTitle, limit = 5) {
+    return this.collectRelatedTopics(query, excludeTitle, limit);
+  },
+
+  /** Recopila temas relacionados desde base manual, Gadget y documentos RAG */
+  collectRelatedTopics(query, excludeTitle = '', limit = 5) {
+    const seen = new Set();
+    const results = [];
+
+    const push = (item) => {
+      const title = String(item.title || '').trim();
+      if (!title || title === excludeTitle) return;
+      const key = (item.id || title).toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      results.push(item);
+    };
+
+    const fromKnowledge = (entry, score) => {
+      const gadgetId = entry.gadgetId || null;
+      const gEntry = gadgetId ? GadgetKBModule.getById(gadgetId) : null;
+      push({
+        id: gadgetId || entry.id,
+        knowledgeId: entry.id,
+        title: entry.pregunta,
+        question: gEntry?.question || entry.pregunta,
+        icon: entry.icon || gEntry?.icon || '💡',
+        score
+      });
+    };
+
+    QueryUnderstandingModule.queryVariants(query).forEach((q) => {
+      KnowledgeBaseModule.searchRanked(q, 0.05, 8).forEach(({ entry, score }) => fromKnowledge(entry, score));
+    });
+
+    QueryUnderstandingModule.queryVariants(query).forEach((q) => {
+      RAGModule.search(q, 6).forEach((r) => {
+        if (r.score < 0.02) return;
+        const kMatch = (database.knowledge || []).find((k) => k.pregunta === r.title || k.id === r.docId);
+        if (kMatch) fromKnowledge(kMatch, r.score);
+        else {
+          push({
+            id: r.id || r.docId || r.title,
+            title: r.title,
+            question: r.title,
+            icon: '📄',
+            score: r.score
+          });
+        }
+      });
+    });
+
+    if (results.length < limit) {
+      GadgetKBModule.getEntries()
+        .filter((e) => e.enabled !== false)
+        .slice(0, 8)
+        .forEach((e) => {
+          push({
+            id: e.id,
+            title: e.title,
+            question: e.question || e.title,
+            icon: e.icon || '💡',
+            score: 0.04
+          });
+        });
+    }
+
+    return results
+      .sort((a, b) => (b.score || 0) - (a.score || 0))
+      .slice(0, limit);
+  },
+
+  /** Mensaje cuando no hay respuesta exacta, con sugerencias clicables */
+  buildNoAnswerResponse(query, fallbackText, excludeTitle = '') {
+    const related = this.collectRelatedTopics(query, excludeTitle, 5);
+    let text = fallbackText;
+    if (related.length) {
+      text += '\n\n**Estos temas podrían ayudarte:**\nToca uno para ver la respuesta.';
+    } else {
+      text += '\n\nPuedes explorar el menú de temas o crear una solicitud al equipo.';
+    }
+    return { text, topicSuggestions: related };
   },
 
   /** Limpia cuerpo de respuesta duplicado o ruidoso */
@@ -6529,10 +6628,13 @@ const ResponseEngine = {
     const medium = match.score >= 0.28;
 
     if (!confident && medium) {
-      const related = this.findRelatedTopics(query, match.title);
+      const related = this.findRelatedTopics(query, match.title, 4);
       if (related.length && match.score < 0.36) {
-        const suggestions = related.map(p => p.entry.pregunta).join('\n• ');
-        body += `\n\n¿Te referías a alguno de estos temas?\n• ${suggestions}`;
+        body += '\n\n**¿Te referías a alguno de estos temas?**';
+        return {
+          body,
+          topicSuggestions: related.slice(0, 4)
+        };
       }
     }
 
@@ -6548,6 +6650,15 @@ const ResponseEngine = {
     }
 
     return null;
+  },
+
+  /** Wrapper de compose — normaliza texto + sugerencias clicables */
+  composeWithSuggestions(query, match, intent) {
+    const result = this.compose(query, match, intent);
+    if (result && typeof result === 'object' && result.body) {
+      return { text: result.body, topicSuggestions: result.topicSuggestions || null };
+    }
+    return { text: result, topicSuggestions: null };
   },
 
   /** Intro contextual breve según tema de la pregunta */
@@ -6614,7 +6725,7 @@ const ResponseEngine = {
 
     const query = this.buildContextualQuery(userText, conv);
     const match = this.retrieve(query);
-    const text = this.compose(query, match, intent);
+    const { text, topicSuggestions } = this.composeWithSuggestions(query, match, intent);
     const confidence = typeof ArturitoCloud !== 'undefined' && ArturitoCloud.chatbot
       ? ArturitoCloud.chatbot.computeConfidence(match)
       : (match ? Math.min(100, Math.round((match.score || 0) / 0.45 * 100)) : 0);
@@ -6623,12 +6734,31 @@ const ResponseEngine = {
       const expression = match && match.score >= 0.42 ? 'happy' : (match && match.score >= 0.28 ? 'think' : 'confused');
       const escalate = confidence < 70;
       const actions = escalate ? ticketActions : undefined;
-      return { text, expression, confidence, escalate, actions, partial: match && match.score < 0.28, analytics: this.buildAnalytics(intent, match, true) };
+      return {
+        text,
+        topicSuggestions: topicSuggestions || null,
+        expression,
+        confidence,
+        escalate,
+        actions,
+        partial: match && match.score < 0.28,
+        analytics: this.buildAnalytics(intent, match, true)
+      };
     }
 
     const customFallback = database.settings?.chatMessages?.fallback?.trim();
     const fallbackText = customFallback || ARTURITO_PERSONALITY.getFallback();
-    return { text: fallbackText, topicsMenu: true, expression: 'confused', actions: ticketActions, partial: true, confidence: 0, escalate: true, analytics: this.buildAnalytics('fallback', null, true) };
+    const noAnswer = this.buildNoAnswerResponse(query, fallbackText, match?.title || '');
+    return {
+      text: noAnswer.text,
+      topicSuggestions: noAnswer.topicSuggestions,
+      expression: 'confused',
+      actions: ticketActions,
+      partial: true,
+      confidence: 0,
+      escalate: true,
+      analytics: this.buildAnalytics('fallback', null, true)
+    };
   }
 };
 
@@ -6947,6 +7077,8 @@ const ChatModule = {
       bodyContent = escapeHtml(m.text).replace(/\n/g, '<br>');
     } else if (m.topicsMenu) {
       bodyContent = formatBotText(m.text) + GadgetKBModule.generateTopicsMenuHTML();
+    } else if (m.topicSuggestions?.length) {
+      bodyContent = formatBotText(m.text) + GadgetKBModule.generateSuggestionsHTML(m.topicSuggestions);
     } else {
       bodyContent = formatBotText(m.text);
     }
@@ -6981,6 +7113,7 @@ const ChatModule = {
     const conv = this.getCurrent(); if (!conv) return null;
     const msg = { id: DatabaseModule.uid('msg'), type:'bot', text, time: Date.now(), actions };
     if (extra?.topicsMenu) msg.topicsMenu = true;
+    if (extra?.topicSuggestions?.length) msg.topicSuggestions = extra.topicSuggestions;
     if (extra?.confidence != null) msg.confidence = extra.confidence;
     conv.messages.push(msg);
     conv.updatedAt = Date.now();
@@ -7031,7 +7164,7 @@ const ChatModule = {
       };
     });
   },
-  /** Responde al seleccionar un tema del menú */
+  /** Responde al seleccionar un tema del menú o sugerencia relacionada */
   onTopicSelected(entryId, question) {
     const entry = GadgetKBModule.getById(entryId);
     if (entry) {
@@ -7047,7 +7180,29 @@ const ChatModule = {
           confidence: 92
         });
       }, 650 + Math.random() * 500);
-    } else if (question) {
+      return;
+    }
+
+    const kEntry = (database.knowledge || []).find((k) => k.id === entryId || k.gadgetId === entryId);
+    if (kEntry) {
+      ArturitoModule.onAnswerFound();
+      const q = question || kEntry.pregunta;
+      this.addUserMessage(q);
+      this.showTyping(true);
+      setTimeout(() => {
+        this.showTyping(false);
+        this.addBotMessage(GadgetKBModule.formatResponse(kEntry.respuesta, q), undefined, {
+          userQuery: q,
+          source: kEntry.origin === 'gadget' ? 'gadget' : 'manual',
+          topicTitle: kEntry.pregunta,
+          intent: 'topic_select',
+          confidence: 90
+        });
+      }, 650 + Math.random() * 500);
+      return;
+    }
+
+    if (question) {
       document.getElementById('chatInput').value = question;
       this.sendMessage();
     }
@@ -7099,6 +7254,7 @@ const ChatModule = {
 
     this.addBotMessage(replyText, result.actions, {
       topicsMenu: !!result.topicsMenu,
+      topicSuggestions: result.topicSuggestions || null,
       confidence: result.confidence,
       userQuery: text,
       source: result.analytics?.source,
