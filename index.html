@@ -2814,24 +2814,47 @@ const ARTURITO_GADGET_KB_SEED = [
 
       this.sync._pushing = true;
       let cloudOk = true;
+      let lastErr = null;
       try {
-        if (scope === 'full' || scope === 'settings') {
-          database.settings = database.settings || {};
-          database.settings.updatedAt = Date.now();
-          const synced = await this.sync.syncSettings(database.settings);
-          if (synced?.updatedAt) database.settings.updatedAt = synced.updatedAt;
-          localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
+        try {
+          if (scope === 'full' || scope === 'settings') {
+            database.settings = database.settings || {};
+            database.settings.updatedAt = Date.now();
+            await this.sync.ensureCondominioDoc(database.settings?.buildingName);
+            const synced = await this.sync.syncSettings(database.settings);
+            if (synced?.updatedAt) database.settings.updatedAt = synced.updatedAt;
+            localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
+          }
+        } catch (err) {
+          cloudOk = false;
+          lastErr = err;
+          console.warn('[DataStore] persist settings:', err);
         }
-        if (scope === 'full' || scope === 'gadgetKB') {
-          await this.sync.pushGadgetKB(database.gadgetKB || []);
+        try {
+          if (scope === 'full' || scope === 'gadgetKB') {
+            await this.sync.pushGadgetKB(database.gadgetKB || []);
+          }
+        } catch (err) {
+          cloudOk = false;
+          lastErr = err;
+          console.warn('[DataStore] persist gadgetKB:', err);
         }
-        if (scope === 'full' || scope === 'knowledge') {
-          await this.sync.pushManualKnowledge(database.manualKnowledge || []);
+        try {
+          if (scope === 'full' || scope === 'knowledge') {
+            await this.sync.pushManualKnowledge(database.manualKnowledge || []);
+          }
+        } catch (err) {
+          cloudOk = false;
+          lastErr = err;
+          console.warn('[DataStore] persist knowledge:', err);
         }
-      } catch (err) {
-        cloudOk = false;
-        console.warn('[DataStore] persist cloud:', err);
-        global.toast?.('Guardado local OK. Error al respaldar en nube: ' + (err.message || err), 'error');
+        if (!cloudOk && lastErr) {
+          const msg = lastErr.message || String(lastErr);
+          const hint = msg.includes('permission') || msg.includes('PERMISSION_DENIED')
+            ? 'Publica las reglas de firestore.rules en Firebase Console (proyecto chatbots-hipodromo).'
+            : msg;
+          global.toast?.('Guardado local OK. Error al respaldar en nube: ' + hint, 'error');
+        }
       } finally {
         this.sync._pushing = false;
       }
@@ -2879,8 +2902,6 @@ const ARTURITO_GADGET_KB_SEED = [
       this.sync.startRealtimeSync(database, (type) => {
         if (callbacks.onSync) callbacks.onSync(type);
       });
-
-      if (callbacks.onReady) callbacks.onReady({ counts, migrated, cloudHasKB });
 
       return { mode: 'cloud', migrated, counts };
     }
@@ -3023,10 +3044,7 @@ const ARTURITO_GADGET_KB_SEED = [
           }
         });
         if (options.database) {
-          await store.bootstrap(options.database, {
-            onSync: options.onSync,
-            onReady: options.onReady
-          });
+          await store.bootstrap(options.database, { onSync: options.onSync });
         }
         UIManager.setCloudBadge(true, 'Firebase · ' + fb.getCondominioId());
         return true;
@@ -7463,7 +7481,7 @@ function registerArturitoServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   var scope = location.pathname.replace(/[^/]*$/, '') || '/';
   var swCode = [
-    "const CACHE_NAME='arturito-ai-v6';",
+    "const CACHE_NAME='arturito-ai-v7';",
     "self.addEventListener('install',function(e){",
     "var SCOPE=self.registration.scope;",
     "var OFFLINE=[SCOPE,new URL('index.html',SCOPE).href,",
@@ -7542,13 +7560,6 @@ const App = {
 
     const cloudHandlers = {
       onSync: (type) => { void App.applyCloudUpdate(type); },
-      onReady: () => {
-        KnowledgeBaseModule.syncFromGadget();
-        void RAGModule.rebuildIndex().then(() => {
-          SettingsModule.apply();
-          ChatModule.applyLiveSettings();
-        });
-      },
       onAuthChange: (user) => {
         AuthModule.currentUser = user;
         const badge = document.getElementById('currentUserBadge');
@@ -7559,12 +7570,15 @@ const App = {
     if (typeof ArturitoCloud !== 'undefined') {
       ArturitoCloud.UIManager.bindFirebaseConfigForm(ArturitoCloud.fb, async () => {
         await ArturitoCloud.init({ database, ...cloudHandlers });
-        cloudHandlers.onReady();
+        KnowledgeBaseModule.syncFromGadget();
+        await RAGModule.rebuildIndex();
+        SettingsModule.apply();
+        ChatModule.applyLiveSettings();
       });
       try {
         await ArturitoCloud.init({ database, ...cloudHandlers });
-        cloudHandlers.onReady();
-      } catch (_) {
+      } catch (err) {
+        console.warn('[ArturitoCloud] init falló:', err);
         ArturitoCloud.UIManager.setCloudBadge(false, 'Modo local');
       }
     } else {
@@ -7580,6 +7594,7 @@ const App = {
     AuthModule.init();
     GadgetModule.init();
     ChatModule.init();
+    ChatModule.applyLiveSettings();
     SettingsModule.init();
     TicketModule.init();
     TrainingModule.init();
