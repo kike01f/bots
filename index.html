@@ -296,18 +296,31 @@ body.mode-client #adminApp{display:none!important}
 .chat-dock .chat-header{position:relative;z-index:2;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.85rem .9rem 1.45rem;border-bottom:none;background:linear-gradient(135deg,#7FBA02 0%,#5a8501 100%);color:#fff;overflow:visible}
 .chat-dock .chat-header::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 20% 30%,rgba(255,255,255,.12) 0%,transparent 50%),radial-gradient(circle at 80% 70%,rgba(255,255,255,.08) 0%,transparent 50%);pointer-events:none}
 .chat-dock .chat-header::after{content:'';position:absolute;bottom:-2px;left:0;width:100%;height:22px;background:#eceef2;border-radius:50% 50% 0 0/100% 100% 0 0;z-index:1}
-.chat-header-main{display:flex;align-items:center;gap:.65rem;min-width:0;flex:1;position:relative;z-index:2}
-.chat-header-main>div{min-width:0;flex:1}
-.chat-header-text{display:flex;flex-direction:column;gap:.12rem;min-width:0}
-.chat-title{font-weight:700;font-size:1rem;color:#fff;line-height:1.2;letter-spacing:-.01em;text-shadow:0 2px 4px rgba(0,0,0,.12);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.chat-tagline{font-size:.78rem;color:rgba(255,255,255,.95);font-weight:500;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.chat-status{font-size:.68rem;color:rgba(255,255,255,.88);margin-top:.08rem;font-weight:500;display:flex;align-items:center;gap:.35rem;line-height:1.2}
+.chat-header-main{display:flex;align-items:center;gap:.75rem;min-width:0;flex:1;position:relative;z-index:2}
+.chat-header-text{
+  flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:.18rem;
+  align-items:flex-start;text-align:left;line-height:1.2
+}
+.chat-title{
+  margin:0;width:100%;font-weight:700;font-size:clamp(.94rem,2.8vw,1.05rem);color:#fff;
+  line-height:1.15;letter-spacing:-.015em;text-shadow:0 2px 4px rgba(0,0,0,.12);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.chat-header-meta{display:flex;flex-direction:column;align-items:flex-start;gap:.12rem;width:100%;min-width:0}
+.chat-tagline{
+  margin:0;width:100%;font-size:.76rem;color:rgba(255,255,255,.94);font-weight:500;line-height:1.2;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.chat-status{
+  margin:0;font-size:.68rem;color:rgba(255,255,255,.9);font-weight:500;
+  display:inline-flex;align-items:center;gap:.35rem;line-height:1;white-space:nowrap
+}
 .chat-status-dot{width:7px;height:7px;border-radius:50%;background:#4ade80;box-shadow:0 0 6px rgba(74,222,128,.55);animation:onlinePulse 2s ease-in-out infinite;flex-shrink:0}
 .chat-status.is-busy .chat-status-dot{background:#fbbf24;box-shadow:0 0 6px rgba(251,191,36,.55)}
 .chat-status.is-busy{color:rgba(255,255,255,.92)}
 /* Contenedor mascota — recuadro gris compacto solo en header del chat */
 .chat-header .arturito-gadget-avatar{
-  width:48px;height:48px;flex-shrink:0;padding:0;background:transparent;border:none;
+  width:48px;height:48px;flex:0 0 48px;padding:0;background:transparent;border:none;
   box-shadow:none;border-radius:0;overflow:visible;position:relative;
   transform-origin:center center;
   transition:transform .45s cubic-bezier(.34,1.25,.64,1);
@@ -489,6 +502,11 @@ body.mode-client #adminApp{display:none!important}
 .chat-dock.chat-history-open .chat-history-mini{display:block}
 .chat-history-item{padding:.4rem .55rem;border-radius:8px;font-size:.75rem;cursor:pointer;margin-bottom:.2rem;color:var(--chat-text)}
 .chat-history-item:hover,.chat-history-item.active{background:var(--chat-accent-dim)}
+@media(min-width:360px){
+  .chat-header-meta{flex-direction:row;flex-wrap:wrap;align-items:center;column-gap:.55rem;row-gap:.1rem}
+  .chat-tagline{flex:1 1 auto;width:auto;max-width:100%}
+  .chat-status{flex:0 0 auto}
+}
 @media(max-height:700px){
   .chat-dock .chat-messages{min-height:80px}
 }
@@ -774,9 +792,14 @@ body.mode-client #adminApp{display:none!important}
         <div class="chat-header-main">
           <div class="arturito-gadget-avatar" id="chatAvatar"></div>
           <div class="chat-header-text">
-            <div class="chat-title" id="chatHeaderBuilding">Edificio Hipódromo</div>
-            <div class="chat-tagline" id="chatBotTagline">Arturito — Tu conserje virtual</div>
-            <div class="chat-status" id="chatSub"><span class="chat-status-dot" aria-hidden="true"></span><span id="chatStatusText">En línea</span></div>
+            <p class="chat-title" id="chatHeaderBuilding">Edificio Hipódromo</p>
+            <div class="chat-header-meta">
+              <p class="chat-tagline" id="chatBotTagline">Arturito — Tu conserje virtual</p>
+              <p class="chat-status" id="chatSub" role="status" aria-live="polite">
+                <span class="chat-status-dot" aria-hidden="true"></span>
+                <span id="chatStatusText">En línea</span>
+              </p>
+            </div>
           </div>
         </div>
         <div class="chat-header-actions">
@@ -3058,14 +3081,22 @@ const ARTURITO_GADGET_KB_SEED = [
       const { writeBatch, deleteDoc, doc } = this.fb._modules;
       const cid = this._cid();
       const unique = [...new Set(ids.filter(Boolean))];
+      const deleteOne = async (docId) => {
+        try {
+          await deleteDoc(doc(this.fb.db, `condominios/${cid}/${collection}`, docId));
+        } catch (err) {
+          if (err?.code === 'not-found') return;
+          throw err;
+        }
+      };
       if (unique.length === 1) {
-        await deleteDoc(doc(this.fb.db, `condominios/${cid}/${collection}`, unique[0]));
+        await deleteOne(unique[0]);
         return;
       }
       for (let i = 0; i < unique.length; i += 400) {
         const batch = writeBatch(this.fb.db);
-        unique.slice(i, i + 400).forEach((id) => {
-          batch.delete(doc(this.fb.db, `condominios/${cid}/${collection}`, id));
+        unique.slice(i, i + 400).forEach((docId) => {
+          batch.delete(doc(this.fb.db, `condominios/${cid}/${collection}`, docId));
         });
         await batch.commit();
       }
@@ -3330,7 +3361,7 @@ const ARTURITO_GADGET_KB_SEED = [
       }
       const toWrite = options.changedIds?.length
         ? list.filter((e) => options.changedIds.includes(e.id))
-        : list;
+        : (options.deletedIds?.length ? [] : list);
       if (toWrite.length) {
         await this.batchWrite(
           'gadget_kb',
@@ -3360,7 +3391,7 @@ const ARTURITO_GADGET_KB_SEED = [
       }
       const toWrite = options.changedIds?.length
         ? manual.filter((k) => options.changedIds.includes(k.id))
-        : manual;
+        : (options.deletedIds?.length ? [] : manual);
       if (toWrite.length) {
         await this.batchWrite(
           'knowledge_base',
@@ -7941,14 +7972,18 @@ const TrainingModule = {
     if (r?.cloud) toast('Base manual guardada en la nube', 'success');
   },
   async removeManual(id) {
-    const entry = (database.manualKnowledge || database.knowledge).find(k => k.id === id);
+    if (!database.manualKnowledge?.length && database.knowledge?.length) {
+      database.manualKnowledge = database.knowledge.filter((k) => k.origin !== 'gadget');
+    }
+    const entry = (database.knowledge || []).find(k => k.id === id)
+      || (database.manualKnowledge || []).find(k => k.id === id);
     const msg = entry?.origin === 'gadget'
       ? '¿Eliminar este tema? También se quitará de la Base Gadget.'
       : '¿Eliminar esta entrada de la base manual?';
     if (!confirm(msg)) return;
     if (entry?.gadgetId) {
       database.gadgetKB = (database.gadgetKB || []).filter(g => g.id !== entry.gadgetId);
-      database.manualKnowledge = (database.manualKnowledge || database.knowledge.filter(k => k.origin !== 'gadget')).filter(k => k.id !== id);
+      database.manualKnowledge = (database.manualKnowledge || []).filter(k => k.id !== id);
       KnowledgeBaseModule.syncFromGadget();
       const r = await DatabaseModule.save('gadgetKB', { gadget: { deletedIds: [entry.gadgetId] } });
       this.renderManual();
@@ -7959,9 +7994,10 @@ const TrainingModule = {
       if (r?.cloud) toast('Tema eliminado y sincronizado en la nube', 'success');
       return;
     }
-    database.manualKnowledge = (database.manualKnowledge || database.knowledge.filter(k => k.origin !== 'gadget')).filter(k => k.id !== id);
+    const manualId = entry?.id || id;
+    database.manualKnowledge = (database.manualKnowledge || []).filter(k => k.id !== manualId);
     KnowledgeBaseModule.syncFromGadget();
-    const r = await DatabaseModule.save('knowledge', { knowledge: { deletedIds: [id] } });
+    const r = await DatabaseModule.save('knowledge', { knowledge: { deletedIds: [manualId] } });
     this.renderManual();
     this.renderGadgetKB();
     this.renderStats();
