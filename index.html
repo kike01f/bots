@@ -218,12 +218,13 @@ body.mode-client #adminApp{display:none!important}
 
 /* ── Portal residente ── */
 .client-portal{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem 1.25rem max(5.5rem,env(safe-area-inset-bottom));text-align:center;position:relative;z-index:1;overflow-x:hidden}
-.client-portal-bg{position:fixed;inset:0;z-index:0;pointer-events:none;background:#0f172a url('https://img.mailinblue.com/8323725/images/content_library/original/6a2d999387ff7b8ea43de198.png') center center/cover no-repeat}
+.client-portal-bg{position:fixed;inset:0;z-index:0;pointer-events:none;background:#0f172a center center/cover no-repeat;transition:background-image .35s ease}
+.client-portal-bg.bg-loaded{background-image:url('https://img.mailinblue.com/8323725/images/content_library/original/6a2d999387ff7b8ea43de198.png')}
 .client-portal-bg::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 120% 80% at 50% 15%,rgba(255,255,255,.22) 0%,transparent 55%);pointer-events:none}
 .client-portal-bg::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.06) 0%,rgba(148,163,184,.1) 20%,rgba(30,41,59,.58) 50%,rgba(15,23,42,.88) 78%,rgba(2,6,23,.94) 100%);pointer-events:none}
-.client-hero{max-width:min(520px,calc(100vw - 2rem));position:relative;z-index:1;padding:1.5rem 1.35rem 1.4rem;background:rgba(15,23,42,.62);border:1px solid rgba(255,255,255,.12);border-radius:var(--radius);box-shadow:0 24px 64px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.06) inset;backdrop-filter:blur(20px) saturate(1.1);-webkit-backdrop-filter:blur(20px) saturate(1.1);overflow:hidden;opacity:0;transform:translateY(18px) scale(.98);animation:heroCardReveal .42s cubic-bezier(.25,.9,.3,1) .04s forwards}
-.client-hero::after{content:'';position:absolute;inset:0;background:linear-gradient(105deg,transparent 40%,rgba(255,255,255,.07) 50%,transparent 60%);transform:translateX(-120%);opacity:0;animation:heroShine .55s ease-out .38s 1 forwards;pointer-events:none;border-radius:inherit}
-.client-arturito-mascot{width:132px;height:132px;margin:0 auto 1.1rem;padding:0;background:transparent;border:none;box-shadow:none;filter:drop-shadow(0 8px 20px rgba(0,0,0,.35));opacity:0;transform:scale(.9) translateY(10px);animation:heroLogoPop .38s cubic-bezier(.25,.9,.3,1) .1s forwards;overflow:visible}
+.client-hero{max-width:min(520px,calc(100vw - 2rem));position:relative;z-index:1;padding:1.5rem 1.35rem 1.4rem;background:rgba(15,23,42,.72);border:1px solid rgba(255,255,255,.12);border-radius:var(--radius);box-shadow:0 24px 64px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.06) inset;backdrop-filter:blur(12px) saturate(1.05);-webkit-backdrop-filter:blur(12px) saturate(1.05);overflow:hidden;opacity:0;transform:translateY(12px) scale(.99);animation:heroCardReveal .26s cubic-bezier(.25,.9,.3,1) .02s forwards}
+.client-hero::after{content:'';position:absolute;inset:0;background:linear-gradient(105deg,transparent 40%,rgba(255,255,255,.07) 50%,transparent 60%);transform:translateX(-120%);opacity:0;animation:heroShine .4s ease-out .22s 1 forwards;pointer-events:none;border-radius:inherit}
+.client-arturito-mascot{width:132px;height:132px;margin:0 auto 1.1rem;padding:0;background:transparent;border:none;box-shadow:none;filter:drop-shadow(0 8px 20px rgba(0,0,0,.35));opacity:1;transform:scale(.96) translateY(4px);animation:heroLogoPop .24s cubic-bezier(.25,.9,.3,1) .04s forwards;overflow:visible}
 .client-arturito-mascot svg{width:100%;height:100%;display:block;overflow:visible}
 .client-arturito-mascot .expression-eyes circle{transform:none!important;transform-box:fill-box;transform-origin:center}
 .client-arturito-mascot .blinking-eyes{animation:arturitoBlinkPortal 5s ease-in-out .55s infinite}
@@ -231,9 +232,10 @@ body.mode-client #adminApp{display:none!important}
   transform-box:fill-box;transform-origin:78% 22%;
   animation:arturitoWaveSoft 4s cubic-bezier(.45,.05,.25,1) .55s infinite
 }
-.client-hero h1{font-size:clamp(1.5rem,4vw,2rem);font-weight:700;margin-bottom:.5rem;background:linear-gradient(135deg,#5eead4,#a5b4fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;opacity:0;transform:translateY(10px);animation:heroLineIn .32s cubic-bezier(.25,.9,.3,1) .16s forwards}
-.client-tagline{color:rgba(241,245,249,.95);font-size:1rem;margin-bottom:1.25rem;font-weight:500;opacity:0;transform:translateY(8px);animation:heroLineIn .32s cubic-bezier(.25,.9,.3,1) .22s forwards}
-.client-hint{font-size:.875rem;color:rgba(226,232,240,.92);padding:1rem 1.25rem;background:rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.1);border-radius:var(--radius-sm);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);opacity:0;transform:translateY(8px);animation:heroLineIn .32s cubic-bezier(.25,.9,.3,1) .28s forwards}
+.client-hero h1{font-size:clamp(1.5rem,4vw,2rem);font-weight:700;margin-bottom:.5rem;background:linear-gradient(135deg,#5eead4,#a5b4fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;opacity:0;transform:translateY(8px);animation:heroLineIn .22s cubic-bezier(.25,.9,.3,1) .08s forwards}
+.client-tagline{color:rgba(241,245,249,.95);font-size:1rem;margin-bottom:1.25rem;font-weight:500;opacity:0;transform:translateY(6px);animation:heroLineIn .22s cubic-bezier(.25,.9,.3,1) .12s forwards}
+.client-hint{font-size:.875rem;color:rgba(226,232,240,.92);padding:1rem 1.25rem;background:rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.1);border-radius:var(--radius-sm);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);opacity:0;transform:translateY(6px);animation:heroLineIn .22s cubic-bezier(.25,.9,.3,1) .16s forwards}
+@media(max-width:768px){.client-hero,.client-hint{backdrop-filter:none;-webkit-backdrop-filter:none;background:rgba(15,23,42,.82)}.client-hero::after{animation:none;opacity:0}}
 .client-hint strong{color:#8FCB1A;font-weight:700}
 @keyframes heroCardReveal{to{opacity:1;transform:translateY(0) scale(1)}}
 @keyframes heroLogoPop{to{opacity:1;transform:scale(1) translateY(0)}}
@@ -242,7 +244,7 @@ body.mode-client #adminApp{display:none!important}
 .client-hero.hero-flash{animation:heroFlash .55s ease}
 @keyframes heroFlash{0%,100%{box-shadow:0 24px 64px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.06) inset}50%{box-shadow:0 24px 64px rgba(0,0,0,.45),0 0 0 1px rgba(143,203,26,.45) inset,0 0 24px rgba(127,186,2,.2)}}
 @media(prefers-reduced-motion:reduce){.client-hero,.client-hero::after,.client-arturito-mascot,.client-arturito-mascot .waving-hand,.client-arturito-mascot .blinking-eyes,.client-hero h1,.client-tagline,.client-hint,.client-footer{animation:none!important;opacity:1!important;transform:none!important;filter:none!important}}
-.client-footer{position:fixed;bottom:max(1rem,env(safe-area-inset-bottom));left:0;right:0;text-align:center;z-index:2;padding:0 1rem;opacity:0;animation:heroLineIn .3s cubic-bezier(.25,.9,.3,1) .34s forwards}
+.client-footer{position:fixed;bottom:max(1rem,env(safe-area-inset-bottom));left:0;right:0;text-align:center;z-index:2;padding:0 1rem;opacity:0;animation:heroLineIn .22s cubic-bezier(.25,.9,.3,1) .2s forwards}
 .client-admin-link{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:.4rem .95rem;color:rgba(255,255,255,.88);font-size:.75rem;cursor:pointer;text-decoration:none;opacity:.92;transition:opacity var(--transition),background var(--transition),color var(--transition),border-color var(--transition);backdrop-filter:blur(8px);text-shadow:0 1px 2px rgba(0,0,0,.25)}
 .client-admin-link:hover{opacity:1;color:#fff;background:rgba(255,255,255,.24);border-color:rgba(255,255,255,.45)}
 
@@ -696,8 +698,543 @@ body.mode-client #adminApp{display:none!important}
 })();
 </script>
 <meta name="theme-color" content="#7FBA02">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+
+<body class="mode-client">
+<!-- ═══ PORTAL RESIDENTE (público) ═══ -->
+<div id="clientPortal" class="client-portal">
+  <div class="client-portal-bg" aria-hidden="true"></div>
+  <div class="client-hero">
+    <div class="client-arturito-mascot" id="clientArturitoMascot" aria-hidden="true"><svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><clipPath id="arturitoFaceClip_portal"><rect x="22" y="34" width="20" height="14" rx="1"/></clipPath></defs><rect x="16" y="28" width="32" height="28" rx="6" fill="#7FBA02"/><rect x="18" y="30" width="28" height="24" rx="4" fill="#8FCB1A"/><rect x="20" y="32" width="24" height="18" rx="2" fill="#1a1a1a"/><rect x="22" y="34" width="20" height="14" rx="1" fill="#2a2a2a"/><rect x="22" y="34" width="8" height="2" rx="1" fill="#fff" opacity="0.3"/><g class="blinking-eyes expression-eyes" clip-path="url(#arturitoFaceClip_portal)"><circle cx="28" cy="40" r="2.5" fill="#7FBA02"/><circle cx="36" cy="40" r="2.5" fill="#7FBA02"/><circle cx="28.5" cy="39.5" r="1" fill="#8FCB1A"/><circle cx="36.5" cy="39.5" r="1" fill="#8FCB1A"/></g><path class="expression-mouth" d="M24 43.5 Q32 49.5 40 43.5" stroke="#7FBA02" stroke-width="2" stroke-linecap="round" fill="none"/><g class="waving-hand"><circle cx="50" cy="20" r="6" fill="#7FBA02" opacity="0.9"/><circle cx="50" cy="20" r="5" fill="#8FCB1A" opacity="0.7"/><path d="M46 24 L50 28 L54 24" fill="#7FBA02" opacity="0.9"/><circle cx="14" cy="18" r="4" fill="#7FBA02" opacity="0.8"/><circle cx="14" cy="18" r="3" fill="#8FCB1A" opacity="0.6"/><path d="M12 22 L14 25 L16 22" fill="#7FBA02" opacity="0.8"/></g><circle cx="24" cy="28" r="2" fill="#FFD700"/><circle cx="40" cy="28" r="2" fill="#FFD700"/><rect x="20" y="54" width="24" height="4" rx="2" fill="#5a8501"/></svg></div>
+    <h1 id="clientBuildingName">Edificio Hipódromo</h1>
+    <p class="client-tagline" id="clientTagline">Tu asistente virtual disponible 24/7</p>
+    <p class="client-hint" id="clientHint">Consulta horarios, gastos comunes, reservas o crea solicitudes. Haz clic en <strong>Arturito</strong> en la esquina inferior derecha.</p>
+  </div>
+  <footer class="client-footer">
+    <button type="button" id="btnAdminAccess" class="client-admin-link">Acceso administración</button>
+  </footer>
+</div>
+<script>
+(function(){
+  try {
+    var d = JSON.parse(localStorage.getItem('arturito_ai_database')||'{}');
+    var s = d.settings;
+    if (s) {
+      var el;
+      if (s.buildingName) { el = document.getElementById('clientBuildingName'); if (el) el.textContent = s.buildingName; }
+      if (s.portalTagline) { el = document.getElementById('clientTagline'); if (el) el.textContent = s.portalTagline; }
+      if (s.portalHint) {
+        el = document.getElementById('clientHint');
+        if (el) el.innerHTML = String(s.portalHint).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
+      }
+    }
+  } catch(e){}
+  var bg = document.querySelector('.client-portal-bg');
+  if (bg) {
+    var img = new Image();
+    img.decoding = 'async';
+    img.onload = function(){ bg.classList.add('bg-loaded'); };
+    img.src = 'https://img.mailinblue.com/8323725/images/content_library/original/6a2d999387ff7b8ea43de198.png';
+  }
+})();
+</script>
+
+<!-- ═══ GADGET ARTURITO (solo residentes) ═══ -->
+<div id="chatDock" class="chat-dock" aria-live="polite" aria-hidden="true">
+  <div id="chatBackdrop" class="chat-backdrop" title="Cerrar chat"></div>
+  <div class="chat-stack">
+    <div class="chat-flotante-wrap">
+    <div id="chatFlotante" class="chat-flotante" role="dialog" aria-labelledby="chatHeaderBuilding">
+      <div class="chat-cloud-glow" aria-hidden="true"></div>
+      <div class="chat-header">
+        <div class="chat-header-main">
+          <div class="arturito-gadget-avatar" id="chatAvatar"></div>
+          <div class="chat-header-text">
+            <div class="chat-title" id="chatHeaderBuilding">Edificio Hipódromo</div>
+            <div class="chat-tagline" id="chatBotTagline">Arturito — Tu conserje virtual</div>
+            <div class="chat-status" id="chatSub"><span class="chat-status-dot" aria-hidden="true"></span><span id="chatStatusText">En línea</span></div>
+          </div>
+        </div>
+        <div class="chat-header-actions">
+          <button type="button" id="chatMenuBtn" class="chat-header-btn" title="Opciones"><span data-icon="menu" data-icon-size="md"></span></button>
+          <div id="chatMenuPopover" class="chat-menu-popover">
+            <button type="button" class="chat-menu-item" id="btnNewChat"><span data-icon="plus" data-icon-size="sm"></span> Nueva conversación</button>
+            <button type="button" class="chat-menu-item" id="btnShowTopics"><span data-icon="topics" data-icon-size="sm"></span> Ver todos los temas</button>
+            <button type="button" class="chat-menu-item" id="btnToggleHistory"><span data-icon="history" data-icon-size="sm"></span> Historial</button>
+            <div style="padding:.35rem .65rem"><input type="text" id="chatSearchHistory" placeholder="Buscar..." style="width:100%;font-size:.78rem;padding:.35rem .5rem;border-radius:8px;border:1px solid rgba(127,186,2,.25)"></div>
+          </div>
+          <button type="button" id="chatCloseBtn" class="chat-header-close" title="Cerrar">×</button>
+        </div>
+      </div>
+      <div class="chat-history-mini" id="chatHistoryList"></div>
+      <div class="chat-messages-wrap">
+        <div class="chat-quick-bar" id="quickQuestions"></div>
+        <div class="chat-messages" id="chatMessages"></div>
+        <div class="typing-indicator" id="typingIndicator"><span></span><span></span><span></span></div>
+      </div>
+      <form class="chat-input-form" id="chatForm">
+        <div class="chat-emoji-popover" id="emojiBar"></div>
+        <button type="button" id="chatEmojiToggle" class="chat-header-btn chat-shortcut-toggle" title="Accesos rápidos" style="width:34px;height:34px"><span data-icon="smile" data-icon-size="md"></span></button>
+        <textarea id="chatInput" placeholder="Escribe tu consulta a Arturito..." rows="1"></textarea>
+        <button type="submit" class="chat-send-btn" id="btnSendChat" title="Enviar"><span data-icon="send" data-icon-size="md"></span></button>
+      </form>
+    </div>
+    </div>
+    <button type="button" id="chatFab" class="chat-fab-arturito" aria-label="Abrir chat con Arturito">
+      <span class="chat-fab-pulse"></span>
+      <span class="arturito-fab-svg" id="chatFabAvatar"></span>
+    </button>
+  </div>
+</div>
+
+<!-- ═══ LOGIN ADMINISTRACIÓN ═══ -->
+<div id="adminLogin" class="admin-login-overlay">
+  <div class="admin-login-card">
+    <h2>Acceso Administración</h2>
+    <p>Panel interno — no visible para residentes</p>
+    <div class="form-group"><label>Correo</label><input type="email" id="loginEmail" placeholder="admin@edificio.cl" autocomplete="username"></div>
+    <div class="form-group"><label>Clave de acceso</label><input type="password" id="loginPass" placeholder="••••••••" autocomplete="current-password"></div>
+    <div style="display:flex;gap:.5rem;margin-top:1rem">
+      <button type="button" class="btn btn-secondary" id="loginCancel" style="flex:1">Volver</button>
+      <button type="button" class="btn btn-primary" id="loginBtn" style="flex:1">Ingresar</button>
+    </div>
+    <button type="button" id="btnForgotPass" style="background:none;border:none;color:var(--primary);font-size:.78rem;margin-top:.75rem;cursor:pointer;width:100%">¿Olvidaste tu contraseña?</button>
+    <p style="font-size:.72rem;color:var(--text-muted);margin-top:1rem;text-align:center">Acceso restringido al personal autorizado</p>
+  </div>
+</div>
+
+<!-- ═══ PANEL ADMINISTRATIVO (privado) ═══ -->
+<div id="adminApp">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-logo" id="sidebarLogo"></div>
+      <div class="sidebar-brand">
+        <h1 id="sidebarTitle">ARTURITO AI</h1>
+        <span id="sidebarBuilding">Panel Administrativo</span>
+      </div>
+    </div>
+    <nav class="nav" id="mainNav">
+      <button class="nav-item active" data-view="admin"><span class="icon" data-icon="dashboard"></span> Dashboard</button>
+      <button class="nav-item" data-view="tickets"><span class="icon" data-icon="tickets"></span> Tickets</button>
+      <button class="nav-item" data-view="knowledge"><span class="icon" data-icon="brain"></span> Entrenamiento IA</button>
+      <button class="nav-item" data-view="users"><span class="icon" data-icon="users"></span> Usuarios</button>
+      <button class="nav-item" data-view="reports"><span class="icon" data-icon="reports"></span> Reportes</button>
+      <button class="nav-item" data-view="settings"><span class="icon" data-icon="settings"></span> Configuración</button>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="theme-toggle" id="themeToggle" title="Cambiar tema"><span data-icon="moon" data-icon-size="md"></span></button>
+      <button class="sidebar-toggle" id="btnLogout" title="Cerrar sesión"><span data-icon="logout" data-icon-size="md"></span></button>
+      <button class="sidebar-toggle" id="sidebarClose" title="Cerrar menú"><span data-icon="close" data-icon-size="md"></span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:.75rem">
+        <button class="mobile-menu-btn" id="mobileMenuBtn"><span data-icon="menu" data-icon-size="md"></span></button>
+        <h2 id="pageTitle">Dashboard</h2>
+      </div>
+      <div class="topbar-actions">
+        <span id="cloudStatusBadge" class="cloud-badge cloud-off">Conectando…</span>
+        <span id="currentUserBadge" style="font-size:.8rem;color:var(--text-muted)"></span>
+        <button class="btn btn-secondary btn-sm" id="btnBackup"><span data-icon="backup" data-icon-size="sm"></span> Backup</button>
+        <button class="btn btn-secondary btn-sm" id="btnRestore"><span data-icon="restore" data-icon-size="sm"></span> Restaurar</button>
+        <input type="file" id="importFile" accept=".json" hidden>
+        <button class="btn btn-secondary btn-sm" id="btnImport"><span data-icon="import" data-icon-size="sm"></span> Importar JSON</button>
+      </div>
+    </header>
+
+    <div class="content">
+      <!-- TICKETS VIEW -->
+      <section class="view" id="view-tickets">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Gestión de Tickets</span>
+            <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+              <button class="btn btn-secondary btn-sm" id="btnExportExcel"><span data-icon="excel" data-icon-size="sm"></span> Excel</button>
+              <button class="btn btn-secondary btn-sm" id="btnExportPDF"><span data-icon="pdf" data-icon-size="sm"></span> PDF</button>
+              <button class="btn btn-primary btn-sm" id="btnNewTicket">+ Nuevo Ticket</button>
+            </div>
+          </div>
+          <div class="toolbar">
+            <div class="search-box"><input type="text" id="ticketSearch" placeholder="Buscar tickets..."></div>
+            <select id="ticketFilterCat"><option value="">Todas categorías</option></select>
+            <select id="ticketFilterStatus"><option value="">Todos estados</option></select>
+            <select id="ticketFilterPriority"><option value="">Todas prioridades</option></select>
+          </div>
+          <div class="table-wrap"><table id="ticketsTable"><thead><tr>
+            <th data-sort="id">ID</th><th data-sort="nombre">Nombre</th><th data-sort="departamento">Depto</th>
+            <th data-sort="categoria">Categoría</th><th data-sort="prioridad">Prioridad</th><th data-sort="estado">Estado</th>
+            <th data-sort="createdAt">Fecha</th><th>Acciones</th>
+          </tr></thead><tbody id="ticketsBody"></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- ADMIN VIEW -->
+      <section class="view active" id="view-admin">
+        <div class="stats-grid" id="adminStats"></div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Tickets — Vista Administrativa</span></div>
+          <div class="toolbar">
+            <div class="search-box"><input type="text" id="adminSearch" placeholder="Buscar..."></div>
+            <select id="adminFilterStatus"><option value="">Todos estados</option></select>
+          </div>
+          <div class="table-wrap"><table id="adminTable"><thead><tr>
+            <th data-sort="id">ID</th><th data-sort="nombre">Residente</th><th data-sort="categoria">Categoría</th>
+            <th data-sort="prioridad">Prioridad</th><th data-sort="estado">Estado</th><th data-sort="createdAt">Fecha</th><th>Acciones</th>
+          </tr></thead><tbody id="adminBody"></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- ENTRENAMIENTO IA -->
+      <section class="view" id="view-knowledge">
+        <div class="training-page-header">
+          <h2>ENTRENAMIENTO IA</h2>
+          <p>Base manual unificada (Gadget + FAQ), documentos y entrenamiento complementario</p>
+        </div>
+        <div class="training-tabs" id="trainingTabs">
+          <button type="button" class="training-tab active" data-tab="gadgetkb"><span data-icon="library" data-icon-size="sm"></span> Base Gadget</button>
+          <button type="button" class="training-tab" data-tab="documents"><span data-icon="document" data-icon-size="sm"></span> Documentos</button>
+          <button type="button" class="training-tab" data-tab="topics"><span data-icon="topics" data-icon-size="sm"></span> Temas</button>
+          <button type="button" class="training-tab" data-tab="manual"><span data-icon="manual" data-icon-size="sm"></span> Manual</button>
+          <button type="button" class="training-tab" data-tab="chatcontent"><span data-icon="chat" data-icon-size="sm"></span> Contenido Chat</button>
+          <button type="button" class="training-tab" data-tab="index"><span data-icon="index" data-icon-size="sm"></span> Índice</button>
+        </div>
+
+        <!-- Tab: Base Gadget (conocimiento Arturito) -->
+        <div class="training-panel active" id="tab-gadgetkb">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Base de Conocimiento Arturito Gadget</span>
+              <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+                <button class="btn btn-secondary btn-sm" id="btnExportGadgetKB"><span data-icon="export" data-icon-size="sm"></span> Exportar</button>
+                <button class="btn btn-secondary btn-sm" id="btnImportGadgetKB"><span data-icon="import" data-icon-size="sm"></span> Importar JSON</button>
+                <input type="file" id="gadgetKBImportFile" accept=".json" hidden>
+                <button class="btn btn-secondary btn-sm" id="btnResetGadgetKB"><span data-icon="undo" data-icon-size="sm"></span> Restaurar original</button>
+                <button class="btn btn-primary btn-sm" id="btnNewGadgetKB">+ Nuevo tema</button>
+              </div>
+            </div>
+            <p style="font-size:.82rem;color:var(--text-muted);margin:-.5rem 0 1rem">Temas del reglamento y servicios del edificio. Se sincronizan automáticamente con la <strong>base manual</strong> que usa Arturito en el chat.</p>
+            <div class="toolbar">
+              <div class="search-box"><input type="text" id="gadgetKBSearch" placeholder="Buscar temas, palabras clave..."></div>
+              <select id="gadgetKBFilterCat" style="min-width:200px"><option value="">Todas las categorías</option></select>
+            </div>
+            <div id="gadgetKBGrouped"></div>
+          </div>
+        </div>
+
+        <!-- Tab: Documentos -->
+        <div class="training-panel" id="tab-documents">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Cargar Documentos</span>
+              <span style="font-size:.8rem;color:var(--text-muted)" id="docCountLabel">0 documentos</span>
+            </div>
+            <div class="drop-zone" id="kbDropZone">
+              <div class="drop-zone-icon"><span data-icon="folder" data-icon-size="xl"></span></div>
+              <p><strong>Arrastra archivos aquí</strong> o haz clic para seleccionar</p>
+              <p class="drop-zone-formats">PDF · DOCX · TXT · CSV · Excel · JSON · XML · HTML · Markdown</p>
+              <input type="file" id="kbFileInput" multiple hidden accept=".pdf,.docx,.txt,.csv,.xlsx,.xls,.json,.xml,.html,.htm,.md,.markdown">
+            </div>
+            <div class="upload-progress" id="uploadProgress"><div class="upload-progress-fill" id="uploadProgressFill"></div></div>
+            <div class="doc-list" id="docList"></div>
+          </div>
+        </div>
+
+        <!-- Tab: Temas indexados -->
+        <div class="training-panel" id="tab-topics">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Análisis por Tema — IA</span>
+              <button class="btn btn-primary btn-sm" id="btnNewTopic">+ Nuevo Tema</button>
+            </div>
+            <p style="font-size:.82rem;color:var(--text-muted);margin:-.5rem 0 1rem">La IA separa cada documento en temas, analiza contenido, puntos clave y preguntas sugeridas. Puede editar y guardar cada tema.</p>
+            <div class="toolbar">
+              <div class="search-box"><input type="text" id="topicSearch" placeholder="Buscar temas..."></div>
+              <select id="topicFilterDoc" style="min-width:180px"><option value="">Todos los documentos</option></select>
+            </div>
+            <div id="topicsGrouped"></div>
+          </div>
+        </div>
+
+        <!-- Tab: Manual -->
+        <div class="training-panel" id="tab-manual">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Base Manual de Conocimiento</span>
+              <div style="display:flex;gap:.5rem">
+                <button class="btn btn-secondary btn-sm" id="btnExportKnowledge"><span data-icon="export" data-icon-size="sm"></span> Exportar</button>
+                <button class="btn btn-primary btn-sm" id="btnNewKnowledge">+ Nuevo</button>
+              </div>
+            </div>
+            <p style="font-size:.82rem;color:var(--text-muted);margin:-.5rem 0 1rem">Incluye las entradas de <strong>Base Gadget</strong> y preguntas/respuestas manuales. Es la fuente principal del chatbot.</p>
+            <div class="toolbar"><div class="search-box"><input type="text" id="knowledgeSearch" placeholder="Buscar en base manual (Gadget + FAQ)..."></div></div>
+            <div class="table-wrap"><table><thead><tr>
+              <th>Origen</th><th>Pregunta</th><th>Respuesta</th><th>Palabras Clave</th><th>Categoría</th><th>Acciones</th>
+            </tr></thead><tbody id="knowledgeBody"></tbody></table></div>
+          </div>
+        </div>
+
+        <!-- Tab: Contenido del Chat -->
+        <div class="training-panel" id="tab-chatcontent">
+          <div class="card">
+            <div class="card-title" style="margin-bottom:1rem">Mensajes y comportamiento del chatbot</div>
+            <form id="chatContentForm" class="form-grid">
+              <div class="form-group full"><label>Mensaje de bienvenida</label><textarea id="ccWelcome" rows="3"></textarea></div>
+              <div class="form-group full"><label>Preguntas rápidas <span style="font-weight:400;color:var(--text-muted)">(una por línea)</span></label><textarea id="ccQuickQuestions" rows="5"></textarea></div>
+              <div class="form-group full" style="margin-top:.5rem;padding-top:1rem;border-top:1px dashed var(--border)">
+                <div style="font-weight:700;margin-bottom:.5rem;font-size:.92rem">Menú de temas del chat</div>
+                <p style="font-size:.8rem;color:var(--text-muted);margin:0 0 .75rem">Los temas y categorías se editan en la pestaña <strong>Base Gadget</strong>. Aquí configuras cómo se muestra el menú al residente.</p>
+              </div>
+              <div class="form-group full"><label>Texto introductorio del menú de temas</label><textarea id="ccTopicsIntro" rows="2" placeholder="Aquí tienes todos los temas organizados por categoría..."></textarea></div>
+              <div class="form-group full"><label style="display:flex;align-items:center;gap:.5rem;font-weight:600;cursor:pointer"><input type="checkbox" id="ccShowTopicsWelcome" checked> Mostrar menú de temas al iniciar una conversación nueva</label></div>
+              <div class="form-group full"><label>Accesos rápidos del chat <span style="font-weight:400;color:var(--text-muted)">(icono:texto — uno por línea, ej. smile:Gracias)</span></label><textarea id="ccChatShortcuts" rows="5"></textarea></div>
+              <div class="form-group full"><label>Respuesta cuando no encuentra información</label><textarea id="ccFallback" rows="3"></textarea></div>
+              <div class="form-group full"><label>Mensaje al escalar a humano</label><textarea id="ccEscalate" rows="2"></textarea></div>
+              <div class="form-group full"><label>Mensaje para crear ticket</label><textarea id="ccTicketPrompt" rows="2"></textarea></div>
+              <div class="form-group full"><label>Sin solicitudes encontradas</label><textarea id="ccNoTickets" rows="2"></textarea></div>
+              <div class="form-group full"><button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar contenido del chat</button></div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Tab: Índice -->
+        <div class="training-panel" id="tab-index">
+          <div class="training-stats" id="trainingStats">
+            <div class="training-stat"><div class="training-stat-value" id="statDocCount">0</div><div class="training-stat-label">Documentos</div></div>
+            <div class="training-stat"><div class="training-stat-value" id="statManualCount">0</div><div class="training-stat-label">Base manual total</div></div>
+            <div class="training-stat"><div class="training-stat-value" id="statGadgetKBCount">0</div><div class="training-stat-label">Desde Base Gadget</div></div>
+            <div class="training-stat"><div class="training-stat-value" id="statTotalChars">0</div><div class="training-stat-label">Caracteres indexados</div></div>
+            <div class="training-stat"><div class="training-stat-value" id="statTopicCount">0</div><div class="training-stat-label">Temas detectados</div></div>
+            <div class="training-stat"><div class="training-stat-value" id="statLastUpload">—</div><div class="training-stat-label">Última carga</div></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">Acciones del índice</span></div>
+            <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+              <button class="btn btn-secondary btn-sm" id="btnReindexDocs"><span data-icon="refresh" data-icon-size="sm"></span> Reindexar conocimiento</button>
+              <button class="btn btn-danger btn-sm" id="btnClearDocs"><span data-icon="trash" data-icon-size="sm"></span> Eliminar todos los documentos</button>
+            </div>
+            <p style="font-size:.8rem;color:var(--text-muted);margin-top:1rem">Los documentos se analizan automáticamente, se dividen por temas y se indexan en IndexedDB. Arturito interpreta el contenido y responde de forma inteligente según la consulta del residente.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- USERS VIEW -->
+      <section class="view" id="view-users">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Gestión de Usuarios</span>
+            <button class="btn btn-primary btn-sm" id="btnNewUser">+ Nuevo Usuario</button>
+          </div>
+          <div class="table-wrap"><table><thead><tr>
+            <th>Nombre</th><th>Email</th><th>Rol</th><th>Departamento</th><th>Acciones</th>
+          </tr></thead><tbody id="usersBody"></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- REPORTS VIEW -->
+      <section class="view" id="view-reports">
+        <div class="charts-grid">
+          <div class="card chart-card"><div class="card-title" style="margin-bottom:.75rem">Tickets por Categoría</div><canvas id="chartCategory"></canvas></div>
+          <div class="card chart-card"><div class="card-title" style="margin-bottom:.75rem">Tickets por Estado</div><canvas id="chartStatus"></canvas></div>
+          <div class="card chart-card"><div class="card-title" style="margin-bottom:.75rem">Tickets por Prioridad</div><canvas id="chartPriority"></canvas></div>
+          <div class="card chart-card" style="grid-column:1/-1"><div class="card-title" style="margin-bottom:.75rem">Evolución Mensual</div><canvas id="chartMonthly" style="height:280px!important"></canvas></div>
+          <div class="card chart-card"><div class="card-title" style="margin-bottom:.75rem">Rendimiento Chatbot (confianza)</div><canvas id="chartChatbot"></canvas></div>
+          <div class="card chart-card"><div class="card-title" style="margin-bottom:.75rem">Uso de la plataforma</div><canvas id="chartUsage"></canvas></div>
+        </div>
+      </section>
+
+      <!-- SETTINGS VIEW -->
+      <section class="view" id="view-settings">
+        <div class="card">
+          <div class="card-title" style="margin-bottom:1rem">Configuración General</div>
+          <form id="settingsForm" class="form-grid">
+            <div class="form-group"><label>Nombre del Edificio</label><input type="text" id="setBuildingName"></div>
+            <div class="form-group"><label>Logo (texto corto o vacío para icono edificio)</label><input type="text" id="setLogo" maxlength="4"></div>
+            <div class="form-group"><label>Nombre del Chatbot</label><input type="text" id="setBotName"></div>
+            <div class="form-group"><label>Color Primario</label><input type="color" id="setPrimaryColor"></div>
+            <div class="form-group"><label>Color Secundario</label><input type="color" id="setSecondaryColor"></div>
+            <div class="form-group full"><label>Mensaje de Bienvenida (chat)</label><textarea id="setWelcomeMsg"></textarea></div>
+            <div class="form-group full" style="margin-top:.5rem;padding-top:1rem;border-top:1px dashed var(--border)">
+              <div style="font-weight:700;margin-bottom:.75rem;font-size:.95rem">Página principal del residente</div>
+            </div>
+            <div class="form-group full"><label>Subtítulo / tagline</label><input type="text" id="setPortalTagline" placeholder="Tu asistente Arturito disponible 24/7"></div>
+            <div class="form-group full"><label>Mensaje principal</label><textarea id="setPortalHint" rows="4" placeholder="Texto visible en la tarjeta central. Usa **negrita** y saltos de línea."></textarea></div>
+            <div class="form-group full"><button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar Configuración</button></div>
+          </form>
+          <div class="firebase-config-card">
+            <h3>Firebase Cloud</h3>
+            <p>Proyecto <strong>chatbots-hipodromo</strong>. Todo el conocimiento, tickets y configuración se respaldan en Firestore. Editable en tiempo real desde el panel.</p>
+            <form id="firebaseConfigForm" class="form-grid">
+              <div class="form-group"><label>API Key</label><input type="text" id="fbApiKey" autocomplete="off" value="AIzaSyBocB2dUQCo2CB3rpFDWvsoUZzS1v-g5Qg"></div>
+              <div class="form-group"><label>Auth Domain</label><input type="text" id="fbAuthDomain" value="chatbots-hipodromo.firebaseapp.com"></div>
+              <div class="form-group"><label>Project ID</label><input type="text" id="fbProjectId" value="chatbots-hipodromo"></div>
+              <div class="form-group"><label>Storage Bucket</label><input type="text" id="fbStorageBucket" value="chatbots-hipodromo.firebasestorage.app"></div>
+              <div class="form-group"><label>Messaging Sender ID</label><input type="text" id="fbMessagingSenderId" value="138621852452"></div>
+              <div class="form-group"><label>App ID</label><input type="text" id="fbAppId" value="1:138621852452:web:43ee805662e0d39bf331b1"></div>
+              <div class="form-group full"><label>ID Condominio (multi-tenant)</label><input type="text" id="fbCondominioId" value="hipodromo"></div>
+              <div class="form-group full" style="display:flex;gap:.5rem;flex-wrap:wrap">
+                <button type="button" class="btn btn-secondary btn-sm" id="btnTestFirebase">Probar conexión</button>
+                <button type="submit" class="btn btn-primary btn-sm">Guardar y conectar</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnMigrateCloud">Sincronizar local → nube</button>
+              </div>
+            </form>
+          </div>
+          <div class="settings-preview" id="settingsPreview"></div>
+          <div class="settings-preview" id="portalPreview" style="margin-top:.75rem;flex-direction:column;align-items:stretch;text-align:center"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- MODALS -->
+<div class="modal-overlay" id="modalTicket"><div class="modal ticket-modal">
+  <div class="ticket-modal-header">
+    <div class="ticket-modal-header-main">
+      <div class="ticket-modal-icon" aria-hidden="true"><span data-icon="ticket" data-icon-size="lg"></span></div>
+      <h3 id="ticketModalTitle">Nuevo Ticket</h3>
+      <p class="ticket-modal-sub" id="ticketModalSub">Completa tu solicitud al edificio</p>
+    </div>
+    <button type="button" class="modal-close" data-close="modalTicket" title="Cerrar">×</button>
+  </div>
+  <div class="ticket-modal-body">
+  <form id="ticketForm" class="form-grid">
+    <input type="hidden" id="ticketEditId">
+    <div class="form-group"><label>Nombre *</label><input type="text" id="tNombre" required></div>
+    <div class="form-group"><label>Departamento *</label><input type="text" id="tDepto" required></div>
+    <div class="form-group"><label>Correo *</label><input type="email" id="tEmail" required></div>
+    <div class="form-group"><label>Categoría *</label><select id="tCategoria" required></select></div>
+    <div class="form-group"><label>Prioridad *</label><select id="tPrioridad" required></select></div>
+    <div class="form-group full"><label>Descripción *</label><textarea id="tDescripcion" required></textarea></div>
+    <div class="form-group full">
+      <label>Documentos adjuntos <span>(opcional · máx. 5 archivos · 5 MB c/u)</span></label>
+      <div class="ticket-attach-zone">
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+          <button type="button" class="btn btn-secondary btn-sm" id="btnTicketAttach"><span data-icon="document" data-icon-size="sm"></span> Adjuntar archivos</button>
+          <span class="ticket-hint">PDF, Word, Excel, imágenes, TXT</span>
+        </div>
+        <input type="file" id="ticketFileInput" multiple hidden accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.gif,.webp,.txt,.xlsx,.xls">
+        <ul class="ticket-attach-list" id="ticketAttachList"></ul>
+      </div>
+    </div>
+    <div class="form-group" id="ticketStatusGroup" style="display:none"><label>Estado</label><select id="tEstado"></select></div>
+    <div class="form-group full ticket-modal-actions">
+      <button type="button" class="btn btn-secondary" data-close="modalTicket">Cancelar</button>
+      <button type="submit" class="btn btn-primary"><span data-icon="send" data-icon-size="sm"></span> Enviar solicitud</button>
+    </div>
+  </form>
+  </div>
+</div></div>
+
+<div class="modal-overlay" id="modalDocument"><div class="modal" style="max-width:680px">
+  <div class="modal-header"><h3 id="docEditTitle">Editar Documento</h3><button class="modal-close" data-close="modalDocument">×</button></div>
+  <form id="documentForm" class="form-grid">
+    <input type="hidden" id="docEditId">
+    <div class="form-group full"><label>Nombre del archivo</label><input type="text" id="docEditName"></div>
+    <div class="form-group full"><label>Contenido completo</label><textarea id="docEditContent" rows="14" style="font-family:monospace;font-size:.82rem"></textarea></div>
+    <div class="form-group full"><label style="display:flex;align-items:center;gap:.5rem;font-weight:400"><input type="checkbox" id="docReparseTopics" checked> Re-analizar y dividir por temas al guardar</label></div>
+    <div class="form-group full" style="display:flex;gap:.5rem;justify-content:flex-end">
+      <button type="button" class="btn btn-secondary" data-close="modalDocument">Cancelar</button>
+      <button type="submit" class="btn btn-primary">Guardar documento</button>
+    </div>
+  </form>
+</div></div>
+
+<div class="modal-overlay" id="modalTopic"><div class="modal">
+  <div class="modal-header"><h3 id="topicModalTitle">Editar Tema</h3><button class="modal-close" data-close="modalTopic">×</button></div>
+  <form id="topicForm" class="form-grid">
+    <input type="hidden" id="topicEditId">
+    <div class="form-group full"><label>Título del tema *</label><input type="text" id="tTitle" required></div>
+    <div class="form-group"><label>Categoría</label><select id="tCategory"></select></div>
+    <div class="form-group"><label>Palabras clave</label><input type="text" id="tKeywords" placeholder="Separadas por coma"></div>
+    <div class="form-group full"><label>Contenido / Respuesta del tema *</label><textarea id="tContent" rows="6" required></textarea></div>
+    <div class="form-group full"><label>Resumen del análisis</label><textarea id="tSummary" rows="2" placeholder="Generado automáticamente por la IA"></textarea></div>
+    <div class="form-group full"><label>Puntos clave <span style="font-weight:400;color:var(--text-muted)">(uno por línea)</span></label><textarea id="tKeyPoints" rows="4" placeholder="La IA extrae los puntos principales..."></textarea></div>
+    <div class="form-group full"><label>Preguntas sugeridas <span style="font-weight:400;color:var(--text-muted)">(una por línea)</span></label><textarea id="tQuestions" rows="3" placeholder="Preguntas que Arturito puede responder con este tema"></textarea></div>
+    <div class="form-group full" style="display:flex;gap:.5rem;justify-content:space-between;align-items:center">
+      <button type="button" class="btn btn-secondary btn-sm" id="btnReanalyzeTopic"><span data-icon="refresh" data-icon-size="sm"></span> Re-analizar con IA</button>
+      <div style="display:flex;gap:.5rem">
+        <button type="button" class="btn btn-secondary" data-close="modalTopic">Cancelar</button>
+        <button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar tema</button>
+      </div>
+    </div>
+  </form>
+</div></div>
+
+<div class="modal-overlay topic-analysis-modal" id="modalTopicAnalysis"><div class="modal">
+  <div class="modal-header">
+    <div><h3 id="topicAnalysisTitle">Análisis por Tema</h3><p style="font-size:.8rem;color:var(--text-muted);margin:.25rem 0 0" id="topicAnalysisSubtitle"></p></div>
+    <button class="modal-close" data-close="modalTopicAnalysis">×</button>
+  </div>
+  <div class="topic-analysis-body" id="topicAnalysisBody"></div>
+  <div style="padding:1rem 1.5rem;border-top:1px solid var(--border);display:flex;gap:.5rem;justify-content:flex-end;flex-wrap:wrap">
+    <button type="button" class="btn btn-secondary" data-close="modalTopicAnalysis">Cerrar</button>
+    <button type="button" class="btn btn-secondary" id="btnReanalyzeDoc"><span data-icon="refresh" data-icon-size="sm"></span> Re-analizar documento</button>
+    <button type="button" class="btn btn-primary" id="btnSaveAllTopics"><span data-icon="save" data-icon-size="sm"></span> Guardar todos los temas</button>
+  </div>
+</div></div>
+
+<div class="modal-overlay" id="modalDocPreview"><div class="modal" style="max-width:680px">
+  <div class="modal-header"><h3 id="docPreviewTitle">Vista previa</h3><button class="modal-close" data-close="modalDocPreview">×</button></div>
+  <div class="doc-preview" id="docPreviewContent"></div>
+  <div style="padding:1rem 1.5rem;border-top:1px solid var(--border);display:flex;justify-content:flex-end">
+    <button type="button" class="btn btn-secondary" data-close="modalDocPreview">Cerrar</button>
+  </div>
+</div></div>
+
+<div class="modal-overlay" id="modalGadgetKB"><div class="modal" style="max-width:720px">
+  <div class="modal-header"><h3 id="gadgetKBModalTitle">Editar Tema</h3><button class="modal-close" data-close="modalGadgetKB">×</button></div>
+  <form id="gadgetKBForm" class="form-grid">
+    <input type="hidden" id="gkbEditId">
+    <div class="form-group"><label>Icono del tema</label><input type="text" id="gkbIcon" placeholder="Ej: horario, ruido, pago" maxlength="24"></div>
+    <div class="form-group"><label>Categoría</label><select id="gkbCategory"></select></div>
+    <div class="form-group full"><label>Título del tema *</label><input type="text" id="gkbTitle" required></div>
+    <div class="form-group full"><label>Pregunta de ejemplo</label><input type="text" id="gkbQuestion" placeholder="Texto que dispara este tema"></div>
+    <div class="form-group full"><label>Palabras clave * <span style="font-weight:400;color:var(--text-muted)">(separadas por coma)</span></label><input type="text" id="gkbKeywords" required placeholder="mudanza, mudanzas, horario"></div>
+    <div class="form-group full"><label>Respuesta completa *</label><textarea id="gkbResponse" rows="12" required placeholder="Texto que Arturito responderá..."></textarea></div>
+    <div class="form-group full"><label style="display:flex;align-items:center;gap:.5rem;font-weight:400"><input type="checkbox" id="gkbEnabled" checked> Tema activo en el chat</label></div>
+    <div class="form-group full" style="display:flex;gap:.5rem;justify-content:flex-end">
+      <button type="button" class="btn btn-secondary" data-close="modalGadgetKB">Cancelar</button>
+      <button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar tema</button>
+    </div>
+  </form>
+</div></div>
+
+<div class="modal-overlay" id="modalKnowledge"><div class="modal">
+  <div class="modal-header"><h3 id="knowledgeModalTitle">Nuevo Conocimiento</h3><button class="modal-close" data-close="modalKnowledge">×</button></div>
+  <form id="knowledgeForm" class="form-grid">
+    <input type="hidden" id="kEditId">
+    <div class="form-group full"><label>Pregunta *</label><input type="text" id="kPregunta" required></div>
+    <div class="form-group full"><label>Respuesta *</label><textarea id="kRespuesta" required></textarea></div>
+    <div class="form-group"><label>Palabras Clave</label><input type="text" id="kKeywords" placeholder="Separadas por coma"></div>
+    <div class="form-group"><label>Categoría</label><select id="kCategoria"></select></div>
+    <div class="form-group full" style="display:flex;gap:.5rem;justify-content:flex-end">
+      <button type="button" class="btn btn-secondary" data-close="modalKnowledge">Cancelar</button>
+      <button type="submit" class="btn btn-primary">Guardar</button>
+    </div>
+  </form>
+</div></div>
+
+<div class="modal-overlay" id="modalUser"><div class="modal">
+  <div class="modal-header"><h3 id="userModalTitle">Nuevo Usuario</h3><button class="modal-close" data-close="modalUser">×</button></div>
+  <form id="userForm" class="form-grid">
+    <input type="hidden" id="uEditId">
+    <div class="form-group"><label>Nombre *</label><input type="text" id="uNombre" required></div>
+    <div class="form-group"><label>Email *</label><input type="email" id="uEmail" required></div>
+    <div class="form-group"><label>Rol *</label><select id="uRol" required></select></div>
+    <div class="form-group"><label>Departamento</label><input type="text" id="uDepto"></div>
+    <div class="form-group full" style="display:flex;gap:.5rem;justify-content:flex-end">
+      <button type="button" class="btn btn-secondary" data-close="modalUser">Cancelar</button>
+      <button type="submit" class="btn btn-primary">Guardar</button>
+    </div>
+  </form>
+</div></div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
 <script>
 /* Conocimiento embebido en la app (semilla local) */
 /* Base de conocimiento Arturito Gadget — importada desde arturito-gadget.html */
@@ -3060,515 +3597,6 @@ const ARTURITO_GADGET_KB_SEED = [
 
 })(typeof window !== 'undefined' ? window : globalThis);
 </script>
-</head>
-<body class="mode-client">
-<!-- ═══ PORTAL RESIDENTE (público) ═══ -->
-<div id="clientPortal" class="client-portal">
-  <div class="client-portal-bg" aria-hidden="true"></div>
-  <div class="client-hero">
-    <div class="client-arturito-mascot" id="clientArturitoMascot" aria-hidden="true"></div>
-    <h1 id="clientBuildingName">Edificio Hipódromo</h1>
-    <p class="client-tagline" id="clientTagline">Tu asistente virtual disponible 24/7</p>
-    <p class="client-hint" id="clientHint">Consulta horarios, gastos comunes, reservas o crea solicitudes. Haz clic en <strong>Arturito</strong> en la esquina inferior derecha.</p>
-  </div>
-  <footer class="client-footer">
-    <button type="button" id="btnAdminAccess" class="client-admin-link">Acceso administración</button>
-  </footer>
-</div>
-
-<!-- ═══ GADGET ARTURITO (solo residentes) ═══ -->
-<div id="chatDock" class="chat-dock" aria-live="polite" aria-hidden="true">
-  <div id="chatBackdrop" class="chat-backdrop" title="Cerrar chat"></div>
-  <div class="chat-stack">
-    <div class="chat-flotante-wrap">
-    <div id="chatFlotante" class="chat-flotante" role="dialog" aria-labelledby="chatHeaderBuilding">
-      <div class="chat-cloud-glow" aria-hidden="true"></div>
-      <div class="chat-header">
-        <div class="chat-header-main">
-          <div class="arturito-gadget-avatar" id="chatAvatar"></div>
-          <div class="chat-header-text">
-            <div class="chat-title" id="chatHeaderBuilding">Edificio Hipódromo</div>
-            <div class="chat-tagline" id="chatBotTagline">Arturito — Tu conserje virtual</div>
-            <div class="chat-status" id="chatSub"><span class="chat-status-dot" aria-hidden="true"></span><span id="chatStatusText">En línea</span></div>
-          </div>
-        </div>
-        <div class="chat-header-actions">
-          <button type="button" id="chatMenuBtn" class="chat-header-btn" title="Opciones"><span data-icon="menu" data-icon-size="md"></span></button>
-          <div id="chatMenuPopover" class="chat-menu-popover">
-            <button type="button" class="chat-menu-item" id="btnNewChat"><span data-icon="plus" data-icon-size="sm"></span> Nueva conversación</button>
-            <button type="button" class="chat-menu-item" id="btnShowTopics"><span data-icon="topics" data-icon-size="sm"></span> Ver todos los temas</button>
-            <button type="button" class="chat-menu-item" id="btnToggleHistory"><span data-icon="history" data-icon-size="sm"></span> Historial</button>
-            <div style="padding:.35rem .65rem"><input type="text" id="chatSearchHistory" placeholder="Buscar..." style="width:100%;font-size:.78rem;padding:.35rem .5rem;border-radius:8px;border:1px solid rgba(127,186,2,.25)"></div>
-          </div>
-          <button type="button" id="chatCloseBtn" class="chat-header-close" title="Cerrar">×</button>
-        </div>
-      </div>
-      <div class="chat-history-mini" id="chatHistoryList"></div>
-      <div class="chat-messages-wrap">
-        <div class="chat-quick-bar" id="quickQuestions"></div>
-        <div class="chat-messages" id="chatMessages"></div>
-        <div class="typing-indicator" id="typingIndicator"><span></span><span></span><span></span></div>
-      </div>
-      <form class="chat-input-form" id="chatForm">
-        <div class="chat-emoji-popover" id="emojiBar"></div>
-        <button type="button" id="chatEmojiToggle" class="chat-header-btn chat-shortcut-toggle" title="Accesos rápidos" style="width:34px;height:34px"><span data-icon="smile" data-icon-size="md"></span></button>
-        <textarea id="chatInput" placeholder="Escribe tu consulta a Arturito..." rows="1"></textarea>
-        <button type="submit" class="chat-send-btn" id="btnSendChat" title="Enviar"><span data-icon="send" data-icon-size="md"></span></button>
-      </form>
-    </div>
-    </div>
-    <button type="button" id="chatFab" class="chat-fab-arturito" aria-label="Abrir chat con Arturito">
-      <span class="chat-fab-pulse"></span>
-      <span class="arturito-fab-svg" id="chatFabAvatar"></span>
-    </button>
-  </div>
-</div>
-
-<!-- ═══ LOGIN ADMINISTRACIÓN ═══ -->
-<div id="adminLogin" class="admin-login-overlay">
-  <div class="admin-login-card">
-    <h2>Acceso Administración</h2>
-    <p>Panel interno — no visible para residentes</p>
-    <div class="form-group"><label>Correo</label><input type="email" id="loginEmail" placeholder="admin@edificio.cl" autocomplete="username"></div>
-    <div class="form-group"><label>Clave de acceso</label><input type="password" id="loginPass" placeholder="••••••••" autocomplete="current-password"></div>
-    <div style="display:flex;gap:.5rem;margin-top:1rem">
-      <button type="button" class="btn btn-secondary" id="loginCancel" style="flex:1">Volver</button>
-      <button type="button" class="btn btn-primary" id="loginBtn" style="flex:1">Ingresar</button>
-    </div>
-    <button type="button" id="btnForgotPass" style="background:none;border:none;color:var(--primary);font-size:.78rem;margin-top:.75rem;cursor:pointer;width:100%">¿Olvidaste tu contraseña?</button>
-    <p style="font-size:.72rem;color:var(--text-muted);margin-top:1rem;text-align:center">Acceso restringido al personal autorizado</p>
-  </div>
-</div>
-
-<!-- ═══ PANEL ADMINISTRATIVO (privado) ═══ -->
-<div id="adminApp">
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-header">
-      <div class="sidebar-logo" id="sidebarLogo"></div>
-      <div class="sidebar-brand">
-        <h1 id="sidebarTitle">ARTURITO AI</h1>
-        <span id="sidebarBuilding">Panel Administrativo</span>
-      </div>
-    </div>
-    <nav class="nav" id="mainNav">
-      <button class="nav-item active" data-view="admin"><span class="icon" data-icon="dashboard"></span> Dashboard</button>
-      <button class="nav-item" data-view="tickets"><span class="icon" data-icon="tickets"></span> Tickets</button>
-      <button class="nav-item" data-view="knowledge"><span class="icon" data-icon="brain"></span> Entrenamiento IA</button>
-      <button class="nav-item" data-view="users"><span class="icon" data-icon="users"></span> Usuarios</button>
-      <button class="nav-item" data-view="reports"><span class="icon" data-icon="reports"></span> Reportes</button>
-      <button class="nav-item" data-view="settings"><span class="icon" data-icon="settings"></span> Configuración</button>
-    </nav>
-    <div class="sidebar-footer">
-      <button class="theme-toggle" id="themeToggle" title="Cambiar tema"><span data-icon="moon" data-icon-size="md"></span></button>
-      <button class="sidebar-toggle" id="btnLogout" title="Cerrar sesión"><span data-icon="logout" data-icon-size="md"></span></button>
-      <button class="sidebar-toggle" id="sidebarClose" title="Cerrar menú"><span data-icon="close" data-icon-size="md"></span></button>
-    </div>
-  </aside>
-
-  <main class="main">
-    <header class="topbar">
-      <div style="display:flex;align-items:center;gap:.75rem">
-        <button class="mobile-menu-btn" id="mobileMenuBtn"><span data-icon="menu" data-icon-size="md"></span></button>
-        <h2 id="pageTitle">Dashboard</h2>
-      </div>
-      <div class="topbar-actions">
-        <span id="cloudStatusBadge" class="cloud-badge cloud-off">Conectando…</span>
-        <span id="currentUserBadge" style="font-size:.8rem;color:var(--text-muted)"></span>
-        <button class="btn btn-secondary btn-sm" id="btnBackup"><span data-icon="backup" data-icon-size="sm"></span> Backup</button>
-        <button class="btn btn-secondary btn-sm" id="btnRestore"><span data-icon="restore" data-icon-size="sm"></span> Restaurar</button>
-        <input type="file" id="importFile" accept=".json" hidden>
-        <button class="btn btn-secondary btn-sm" id="btnImport"><span data-icon="import" data-icon-size="sm"></span> Importar JSON</button>
-      </div>
-    </header>
-
-    <div class="content">
-      <!-- TICKETS VIEW -->
-      <section class="view" id="view-tickets">
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">Gestión de Tickets</span>
-            <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-              <button class="btn btn-secondary btn-sm" id="btnExportExcel"><span data-icon="excel" data-icon-size="sm"></span> Excel</button>
-              <button class="btn btn-secondary btn-sm" id="btnExportPDF"><span data-icon="pdf" data-icon-size="sm"></span> PDF</button>
-              <button class="btn btn-primary btn-sm" id="btnNewTicket">+ Nuevo Ticket</button>
-            </div>
-          </div>
-          <div class="toolbar">
-            <div class="search-box"><input type="text" id="ticketSearch" placeholder="Buscar tickets..."></div>
-            <select id="ticketFilterCat"><option value="">Todas categorías</option></select>
-            <select id="ticketFilterStatus"><option value="">Todos estados</option></select>
-            <select id="ticketFilterPriority"><option value="">Todas prioridades</option></select>
-          </div>
-          <div class="table-wrap"><table id="ticketsTable"><thead><tr>
-            <th data-sort="id">ID</th><th data-sort="nombre">Nombre</th><th data-sort="departamento">Depto</th>
-            <th data-sort="categoria">Categoría</th><th data-sort="prioridad">Prioridad</th><th data-sort="estado">Estado</th>
-            <th data-sort="createdAt">Fecha</th><th>Acciones</th>
-          </tr></thead><tbody id="ticketsBody"></tbody></table></div>
-        </div>
-      </section>
-
-      <!-- ADMIN VIEW -->
-      <section class="view active" id="view-admin">
-        <div class="stats-grid" id="adminStats"></div>
-        <div class="card">
-          <div class="card-header"><span class="card-title">Tickets — Vista Administrativa</span></div>
-          <div class="toolbar">
-            <div class="search-box"><input type="text" id="adminSearch" placeholder="Buscar..."></div>
-            <select id="adminFilterStatus"><option value="">Todos estados</option></select>
-          </div>
-          <div class="table-wrap"><table id="adminTable"><thead><tr>
-            <th data-sort="id">ID</th><th data-sort="nombre">Residente</th><th data-sort="categoria">Categoría</th>
-            <th data-sort="prioridad">Prioridad</th><th data-sort="estado">Estado</th><th data-sort="createdAt">Fecha</th><th>Acciones</th>
-          </tr></thead><tbody id="adminBody"></tbody></table></div>
-        </div>
-      </section>
-
-      <!-- ENTRENAMIENTO IA -->
-      <section class="view" id="view-knowledge">
-        <div class="training-page-header">
-          <h2>ENTRENAMIENTO IA</h2>
-          <p>Base manual unificada (Gadget + FAQ), documentos y entrenamiento complementario</p>
-        </div>
-        <div class="training-tabs" id="trainingTabs">
-          <button type="button" class="training-tab active" data-tab="gadgetkb"><span data-icon="library" data-icon-size="sm"></span> Base Gadget</button>
-          <button type="button" class="training-tab" data-tab="documents"><span data-icon="document" data-icon-size="sm"></span> Documentos</button>
-          <button type="button" class="training-tab" data-tab="topics"><span data-icon="topics" data-icon-size="sm"></span> Temas</button>
-          <button type="button" class="training-tab" data-tab="manual"><span data-icon="manual" data-icon-size="sm"></span> Manual</button>
-          <button type="button" class="training-tab" data-tab="chatcontent"><span data-icon="chat" data-icon-size="sm"></span> Contenido Chat</button>
-          <button type="button" class="training-tab" data-tab="index"><span data-icon="index" data-icon-size="sm"></span> Índice</button>
-        </div>
-
-        <!-- Tab: Base Gadget (conocimiento Arturito) -->
-        <div class="training-panel active" id="tab-gadgetkb">
-          <div class="card">
-            <div class="card-header">
-              <span class="card-title">Base de Conocimiento Arturito Gadget</span>
-              <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-                <button class="btn btn-secondary btn-sm" id="btnExportGadgetKB"><span data-icon="export" data-icon-size="sm"></span> Exportar</button>
-                <button class="btn btn-secondary btn-sm" id="btnImportGadgetKB"><span data-icon="import" data-icon-size="sm"></span> Importar JSON</button>
-                <input type="file" id="gadgetKBImportFile" accept=".json" hidden>
-                <button class="btn btn-secondary btn-sm" id="btnResetGadgetKB"><span data-icon="undo" data-icon-size="sm"></span> Restaurar original</button>
-                <button class="btn btn-primary btn-sm" id="btnNewGadgetKB">+ Nuevo tema</button>
-              </div>
-            </div>
-            <p style="font-size:.82rem;color:var(--text-muted);margin:-.5rem 0 1rem">Temas del reglamento y servicios del edificio. Se sincronizan automáticamente con la <strong>base manual</strong> que usa Arturito en el chat.</p>
-            <div class="toolbar">
-              <div class="search-box"><input type="text" id="gadgetKBSearch" placeholder="Buscar temas, palabras clave..."></div>
-              <select id="gadgetKBFilterCat" style="min-width:200px"><option value="">Todas las categorías</option></select>
-            </div>
-            <div id="gadgetKBGrouped"></div>
-          </div>
-        </div>
-
-        <!-- Tab: Documentos -->
-        <div class="training-panel" id="tab-documents">
-          <div class="card">
-            <div class="card-header">
-              <span class="card-title">Cargar Documentos</span>
-              <span style="font-size:.8rem;color:var(--text-muted)" id="docCountLabel">0 documentos</span>
-            </div>
-            <div class="drop-zone" id="kbDropZone">
-              <div class="drop-zone-icon"><span data-icon="folder" data-icon-size="xl"></span></div>
-              <p><strong>Arrastra archivos aquí</strong> o haz clic para seleccionar</p>
-              <p class="drop-zone-formats">PDF · DOCX · TXT · CSV · Excel · JSON · XML · HTML · Markdown</p>
-              <input type="file" id="kbFileInput" multiple hidden accept=".pdf,.docx,.txt,.csv,.xlsx,.xls,.json,.xml,.html,.htm,.md,.markdown">
-            </div>
-            <div class="upload-progress" id="uploadProgress"><div class="upload-progress-fill" id="uploadProgressFill"></div></div>
-            <div class="doc-list" id="docList"></div>
-          </div>
-        </div>
-
-        <!-- Tab: Temas indexados -->
-        <div class="training-panel" id="tab-topics">
-          <div class="card">
-            <div class="card-header">
-              <span class="card-title">Análisis por Tema — IA</span>
-              <button class="btn btn-primary btn-sm" id="btnNewTopic">+ Nuevo Tema</button>
-            </div>
-            <p style="font-size:.82rem;color:var(--text-muted);margin:-.5rem 0 1rem">La IA separa cada documento en temas, analiza contenido, puntos clave y preguntas sugeridas. Puede editar y guardar cada tema.</p>
-            <div class="toolbar">
-              <div class="search-box"><input type="text" id="topicSearch" placeholder="Buscar temas..."></div>
-              <select id="topicFilterDoc" style="min-width:180px"><option value="">Todos los documentos</option></select>
-            </div>
-            <div id="topicsGrouped"></div>
-          </div>
-        </div>
-
-        <!-- Tab: Manual -->
-        <div class="training-panel" id="tab-manual">
-          <div class="card">
-            <div class="card-header">
-              <span class="card-title">Base Manual de Conocimiento</span>
-              <div style="display:flex;gap:.5rem">
-                <button class="btn btn-secondary btn-sm" id="btnExportKnowledge"><span data-icon="export" data-icon-size="sm"></span> Exportar</button>
-                <button class="btn btn-primary btn-sm" id="btnNewKnowledge">+ Nuevo</button>
-              </div>
-            </div>
-            <p style="font-size:.82rem;color:var(--text-muted);margin:-.5rem 0 1rem">Incluye las entradas de <strong>Base Gadget</strong> y preguntas/respuestas manuales. Es la fuente principal del chatbot.</p>
-            <div class="toolbar"><div class="search-box"><input type="text" id="knowledgeSearch" placeholder="Buscar en base manual (Gadget + FAQ)..."></div></div>
-            <div class="table-wrap"><table><thead><tr>
-              <th>Origen</th><th>Pregunta</th><th>Respuesta</th><th>Palabras Clave</th><th>Categoría</th><th>Acciones</th>
-            </tr></thead><tbody id="knowledgeBody"></tbody></table></div>
-          </div>
-        </div>
-
-        <!-- Tab: Contenido del Chat -->
-        <div class="training-panel" id="tab-chatcontent">
-          <div class="card">
-            <div class="card-title" style="margin-bottom:1rem">Mensajes y comportamiento del chatbot</div>
-            <form id="chatContentForm" class="form-grid">
-              <div class="form-group full"><label>Mensaje de bienvenida</label><textarea id="ccWelcome" rows="3"></textarea></div>
-              <div class="form-group full"><label>Preguntas rápidas <span style="font-weight:400;color:var(--text-muted)">(una por línea)</span></label><textarea id="ccQuickQuestions" rows="5"></textarea></div>
-              <div class="form-group full" style="margin-top:.5rem;padding-top:1rem;border-top:1px dashed var(--border)">
-                <div style="font-weight:700;margin-bottom:.5rem;font-size:.92rem">Menú de temas del chat</div>
-                <p style="font-size:.8rem;color:var(--text-muted);margin:0 0 .75rem">Los temas y categorías se editan en la pestaña <strong>Base Gadget</strong>. Aquí configuras cómo se muestra el menú al residente.</p>
-              </div>
-              <div class="form-group full"><label>Texto introductorio del menú de temas</label><textarea id="ccTopicsIntro" rows="2" placeholder="Aquí tienes todos los temas organizados por categoría..."></textarea></div>
-              <div class="form-group full"><label style="display:flex;align-items:center;gap:.5rem;font-weight:600;cursor:pointer"><input type="checkbox" id="ccShowTopicsWelcome" checked> Mostrar menú de temas al iniciar una conversación nueva</label></div>
-              <div class="form-group full"><label>Accesos rápidos del chat <span style="font-weight:400;color:var(--text-muted)">(icono:texto — uno por línea, ej. smile:Gracias)</span></label><textarea id="ccChatShortcuts" rows="5"></textarea></div>
-              <div class="form-group full"><label>Respuesta cuando no encuentra información</label><textarea id="ccFallback" rows="3"></textarea></div>
-              <div class="form-group full"><label>Mensaje al escalar a humano</label><textarea id="ccEscalate" rows="2"></textarea></div>
-              <div class="form-group full"><label>Mensaje para crear ticket</label><textarea id="ccTicketPrompt" rows="2"></textarea></div>
-              <div class="form-group full"><label>Sin solicitudes encontradas</label><textarea id="ccNoTickets" rows="2"></textarea></div>
-              <div class="form-group full"><button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar contenido del chat</button></div>
-            </form>
-          </div>
-        </div>
-
-        <!-- Tab: Índice -->
-        <div class="training-panel" id="tab-index">
-          <div class="training-stats" id="trainingStats">
-            <div class="training-stat"><div class="training-stat-value" id="statDocCount">0</div><div class="training-stat-label">Documentos</div></div>
-            <div class="training-stat"><div class="training-stat-value" id="statManualCount">0</div><div class="training-stat-label">Base manual total</div></div>
-            <div class="training-stat"><div class="training-stat-value" id="statGadgetKBCount">0</div><div class="training-stat-label">Desde Base Gadget</div></div>
-            <div class="training-stat"><div class="training-stat-value" id="statTotalChars">0</div><div class="training-stat-label">Caracteres indexados</div></div>
-            <div class="training-stat"><div class="training-stat-value" id="statTopicCount">0</div><div class="training-stat-label">Temas detectados</div></div>
-            <div class="training-stat"><div class="training-stat-value" id="statLastUpload">—</div><div class="training-stat-label">Última carga</div></div>
-          </div>
-          <div class="card">
-            <div class="card-header"><span class="card-title">Acciones del índice</span></div>
-            <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-              <button class="btn btn-secondary btn-sm" id="btnReindexDocs"><span data-icon="refresh" data-icon-size="sm"></span> Reindexar conocimiento</button>
-              <button class="btn btn-danger btn-sm" id="btnClearDocs"><span data-icon="trash" data-icon-size="sm"></span> Eliminar todos los documentos</button>
-            </div>
-            <p style="font-size:.8rem;color:var(--text-muted);margin-top:1rem">Los documentos se analizan automáticamente, se dividen por temas y se indexan en IndexedDB. Arturito interpreta el contenido y responde de forma inteligente según la consulta del residente.</p>
-          </div>
-        </div>
-      </section>
-
-      <!-- USERS VIEW -->
-      <section class="view" id="view-users">
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">Gestión de Usuarios</span>
-            <button class="btn btn-primary btn-sm" id="btnNewUser">+ Nuevo Usuario</button>
-          </div>
-          <div class="table-wrap"><table><thead><tr>
-            <th>Nombre</th><th>Email</th><th>Rol</th><th>Departamento</th><th>Acciones</th>
-          </tr></thead><tbody id="usersBody"></tbody></table></div>
-        </div>
-      </section>
-
-      <!-- REPORTS VIEW -->
-      <section class="view" id="view-reports">
-        <div class="charts-grid">
-          <div class="card chart-card"><div class="card-title" style="margin-bottom:.75rem">Tickets por Categoría</div><canvas id="chartCategory"></canvas></div>
-          <div class="card chart-card"><div class="card-title" style="margin-bottom:.75rem">Tickets por Estado</div><canvas id="chartStatus"></canvas></div>
-          <div class="card chart-card"><div class="card-title" style="margin-bottom:.75rem">Tickets por Prioridad</div><canvas id="chartPriority"></canvas></div>
-          <div class="card chart-card" style="grid-column:1/-1"><div class="card-title" style="margin-bottom:.75rem">Evolución Mensual</div><canvas id="chartMonthly" style="height:280px!important"></canvas></div>
-          <div class="card chart-card"><div class="card-title" style="margin-bottom:.75rem">Rendimiento Chatbot (confianza)</div><canvas id="chartChatbot"></canvas></div>
-          <div class="card chart-card"><div class="card-title" style="margin-bottom:.75rem">Uso de la plataforma</div><canvas id="chartUsage"></canvas></div>
-        </div>
-      </section>
-
-      <!-- SETTINGS VIEW -->
-      <section class="view" id="view-settings">
-        <div class="card">
-          <div class="card-title" style="margin-bottom:1rem">Configuración General</div>
-          <form id="settingsForm" class="form-grid">
-            <div class="form-group"><label>Nombre del Edificio</label><input type="text" id="setBuildingName"></div>
-            <div class="form-group"><label>Logo (texto corto o vacío para icono edificio)</label><input type="text" id="setLogo" maxlength="4"></div>
-            <div class="form-group"><label>Nombre del Chatbot</label><input type="text" id="setBotName"></div>
-            <div class="form-group"><label>Color Primario</label><input type="color" id="setPrimaryColor"></div>
-            <div class="form-group"><label>Color Secundario</label><input type="color" id="setSecondaryColor"></div>
-            <div class="form-group full"><label>Mensaje de Bienvenida (chat)</label><textarea id="setWelcomeMsg"></textarea></div>
-            <div class="form-group full" style="margin-top:.5rem;padding-top:1rem;border-top:1px dashed var(--border)">
-              <div style="font-weight:700;margin-bottom:.75rem;font-size:.95rem">Página principal del residente</div>
-            </div>
-            <div class="form-group full"><label>Subtítulo / tagline</label><input type="text" id="setPortalTagline" placeholder="Tu asistente Arturito disponible 24/7"></div>
-            <div class="form-group full"><label>Mensaje principal</label><textarea id="setPortalHint" rows="4" placeholder="Texto visible en la tarjeta central. Usa **negrita** y saltos de línea."></textarea></div>
-            <div class="form-group full"><button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar Configuración</button></div>
-          </form>
-          <div class="firebase-config-card">
-            <h3>Firebase Cloud</h3>
-            <p>Proyecto <strong>chatbots-hipodromo</strong>. Todo el conocimiento, tickets y configuración se respaldan en Firestore. Editable en tiempo real desde el panel.</p>
-            <form id="firebaseConfigForm" class="form-grid">
-              <div class="form-group"><label>API Key</label><input type="text" id="fbApiKey" autocomplete="off" value="AIzaSyBocB2dUQCo2CB3rpFDWvsoUZzS1v-g5Qg"></div>
-              <div class="form-group"><label>Auth Domain</label><input type="text" id="fbAuthDomain" value="chatbots-hipodromo.firebaseapp.com"></div>
-              <div class="form-group"><label>Project ID</label><input type="text" id="fbProjectId" value="chatbots-hipodromo"></div>
-              <div class="form-group"><label>Storage Bucket</label><input type="text" id="fbStorageBucket" value="chatbots-hipodromo.firebasestorage.app"></div>
-              <div class="form-group"><label>Messaging Sender ID</label><input type="text" id="fbMessagingSenderId" value="138621852452"></div>
-              <div class="form-group"><label>App ID</label><input type="text" id="fbAppId" value="1:138621852452:web:43ee805662e0d39bf331b1"></div>
-              <div class="form-group full"><label>ID Condominio (multi-tenant)</label><input type="text" id="fbCondominioId" value="hipodromo"></div>
-              <div class="form-group full" style="display:flex;gap:.5rem;flex-wrap:wrap">
-                <button type="button" class="btn btn-secondary btn-sm" id="btnTestFirebase">Probar conexión</button>
-                <button type="submit" class="btn btn-primary btn-sm">Guardar y conectar</button>
-                <button type="button" class="btn btn-secondary btn-sm" id="btnMigrateCloud">Sincronizar local → nube</button>
-              </div>
-            </form>
-          </div>
-          <div class="settings-preview" id="settingsPreview"></div>
-          <div class="settings-preview" id="portalPreview" style="margin-top:.75rem;flex-direction:column;align-items:stretch;text-align:center"></div>
-        </div>
-      </section>
-    </div>
-  </main>
-</div>
-
-<!-- MODALS -->
-<div class="modal-overlay" id="modalTicket"><div class="modal ticket-modal">
-  <div class="ticket-modal-header">
-    <div class="ticket-modal-header-main">
-      <div class="ticket-modal-icon" aria-hidden="true"><span data-icon="ticket" data-icon-size="lg"></span></div>
-      <h3 id="ticketModalTitle">Nuevo Ticket</h3>
-      <p class="ticket-modal-sub" id="ticketModalSub">Completa tu solicitud al edificio</p>
-    </div>
-    <button type="button" class="modal-close" data-close="modalTicket" title="Cerrar">×</button>
-  </div>
-  <div class="ticket-modal-body">
-  <form id="ticketForm" class="form-grid">
-    <input type="hidden" id="ticketEditId">
-    <div class="form-group"><label>Nombre *</label><input type="text" id="tNombre" required></div>
-    <div class="form-group"><label>Departamento *</label><input type="text" id="tDepto" required></div>
-    <div class="form-group"><label>Correo *</label><input type="email" id="tEmail" required></div>
-    <div class="form-group"><label>Categoría *</label><select id="tCategoria" required></select></div>
-    <div class="form-group"><label>Prioridad *</label><select id="tPrioridad" required></select></div>
-    <div class="form-group full"><label>Descripción *</label><textarea id="tDescripcion" required></textarea></div>
-    <div class="form-group full">
-      <label>Documentos adjuntos <span>(opcional · máx. 5 archivos · 5 MB c/u)</span></label>
-      <div class="ticket-attach-zone">
-        <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
-          <button type="button" class="btn btn-secondary btn-sm" id="btnTicketAttach"><span data-icon="document" data-icon-size="sm"></span> Adjuntar archivos</button>
-          <span class="ticket-hint">PDF, Word, Excel, imágenes, TXT</span>
-        </div>
-        <input type="file" id="ticketFileInput" multiple hidden accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.gif,.webp,.txt,.xlsx,.xls">
-        <ul class="ticket-attach-list" id="ticketAttachList"></ul>
-      </div>
-    </div>
-    <div class="form-group" id="ticketStatusGroup" style="display:none"><label>Estado</label><select id="tEstado"></select></div>
-    <div class="form-group full ticket-modal-actions">
-      <button type="button" class="btn btn-secondary" data-close="modalTicket">Cancelar</button>
-      <button type="submit" class="btn btn-primary"><span data-icon="send" data-icon-size="sm"></span> Enviar solicitud</button>
-    </div>
-  </form>
-  </div>
-</div></div>
-
-<div class="modal-overlay" id="modalDocument"><div class="modal" style="max-width:680px">
-  <div class="modal-header"><h3 id="docEditTitle">Editar Documento</h3><button class="modal-close" data-close="modalDocument">×</button></div>
-  <form id="documentForm" class="form-grid">
-    <input type="hidden" id="docEditId">
-    <div class="form-group full"><label>Nombre del archivo</label><input type="text" id="docEditName"></div>
-    <div class="form-group full"><label>Contenido completo</label><textarea id="docEditContent" rows="14" style="font-family:monospace;font-size:.82rem"></textarea></div>
-    <div class="form-group full"><label style="display:flex;align-items:center;gap:.5rem;font-weight:400"><input type="checkbox" id="docReparseTopics" checked> Re-analizar y dividir por temas al guardar</label></div>
-    <div class="form-group full" style="display:flex;gap:.5rem;justify-content:flex-end">
-      <button type="button" class="btn btn-secondary" data-close="modalDocument">Cancelar</button>
-      <button type="submit" class="btn btn-primary">Guardar documento</button>
-    </div>
-  </form>
-</div></div>
-
-<div class="modal-overlay" id="modalTopic"><div class="modal">
-  <div class="modal-header"><h3 id="topicModalTitle">Editar Tema</h3><button class="modal-close" data-close="modalTopic">×</button></div>
-  <form id="topicForm" class="form-grid">
-    <input type="hidden" id="topicEditId">
-    <div class="form-group full"><label>Título del tema *</label><input type="text" id="tTitle" required></div>
-    <div class="form-group"><label>Categoría</label><select id="tCategory"></select></div>
-    <div class="form-group"><label>Palabras clave</label><input type="text" id="tKeywords" placeholder="Separadas por coma"></div>
-    <div class="form-group full"><label>Contenido / Respuesta del tema *</label><textarea id="tContent" rows="6" required></textarea></div>
-    <div class="form-group full"><label>Resumen del análisis</label><textarea id="tSummary" rows="2" placeholder="Generado automáticamente por la IA"></textarea></div>
-    <div class="form-group full"><label>Puntos clave <span style="font-weight:400;color:var(--text-muted)">(uno por línea)</span></label><textarea id="tKeyPoints" rows="4" placeholder="La IA extrae los puntos principales..."></textarea></div>
-    <div class="form-group full"><label>Preguntas sugeridas <span style="font-weight:400;color:var(--text-muted)">(una por línea)</span></label><textarea id="tQuestions" rows="3" placeholder="Preguntas que Arturito puede responder con este tema"></textarea></div>
-    <div class="form-group full" style="display:flex;gap:.5rem;justify-content:space-between;align-items:center">
-      <button type="button" class="btn btn-secondary btn-sm" id="btnReanalyzeTopic"><span data-icon="refresh" data-icon-size="sm"></span> Re-analizar con IA</button>
-      <div style="display:flex;gap:.5rem">
-        <button type="button" class="btn btn-secondary" data-close="modalTopic">Cancelar</button>
-        <button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar tema</button>
-      </div>
-    </div>
-  </form>
-</div></div>
-
-<div class="modal-overlay topic-analysis-modal" id="modalTopicAnalysis"><div class="modal">
-  <div class="modal-header">
-    <div><h3 id="topicAnalysisTitle">Análisis por Tema</h3><p style="font-size:.8rem;color:var(--text-muted);margin:.25rem 0 0" id="topicAnalysisSubtitle"></p></div>
-    <button class="modal-close" data-close="modalTopicAnalysis">×</button>
-  </div>
-  <div class="topic-analysis-body" id="topicAnalysisBody"></div>
-  <div style="padding:1rem 1.5rem;border-top:1px solid var(--border);display:flex;gap:.5rem;justify-content:flex-end;flex-wrap:wrap">
-    <button type="button" class="btn btn-secondary" data-close="modalTopicAnalysis">Cerrar</button>
-    <button type="button" class="btn btn-secondary" id="btnReanalyzeDoc"><span data-icon="refresh" data-icon-size="sm"></span> Re-analizar documento</button>
-    <button type="button" class="btn btn-primary" id="btnSaveAllTopics"><span data-icon="save" data-icon-size="sm"></span> Guardar todos los temas</button>
-  </div>
-</div></div>
-
-<div class="modal-overlay" id="modalDocPreview"><div class="modal" style="max-width:680px">
-  <div class="modal-header"><h3 id="docPreviewTitle">Vista previa</h3><button class="modal-close" data-close="modalDocPreview">×</button></div>
-  <div class="doc-preview" id="docPreviewContent"></div>
-  <div style="padding:1rem 1.5rem;border-top:1px solid var(--border);display:flex;justify-content:flex-end">
-    <button type="button" class="btn btn-secondary" data-close="modalDocPreview">Cerrar</button>
-  </div>
-</div></div>
-
-<div class="modal-overlay" id="modalGadgetKB"><div class="modal" style="max-width:720px">
-  <div class="modal-header"><h3 id="gadgetKBModalTitle">Editar Tema</h3><button class="modal-close" data-close="modalGadgetKB">×</button></div>
-  <form id="gadgetKBForm" class="form-grid">
-    <input type="hidden" id="gkbEditId">
-    <div class="form-group"><label>Icono del tema</label><input type="text" id="gkbIcon" placeholder="Ej: horario, ruido, pago" maxlength="24"></div>
-    <div class="form-group"><label>Categoría</label><select id="gkbCategory"></select></div>
-    <div class="form-group full"><label>Título del tema *</label><input type="text" id="gkbTitle" required></div>
-    <div class="form-group full"><label>Pregunta de ejemplo</label><input type="text" id="gkbQuestion" placeholder="Texto que dispara este tema"></div>
-    <div class="form-group full"><label>Palabras clave * <span style="font-weight:400;color:var(--text-muted)">(separadas por coma)</span></label><input type="text" id="gkbKeywords" required placeholder="mudanza, mudanzas, horario"></div>
-    <div class="form-group full"><label>Respuesta completa *</label><textarea id="gkbResponse" rows="12" required placeholder="Texto que Arturito responderá..."></textarea></div>
-    <div class="form-group full"><label style="display:flex;align-items:center;gap:.5rem;font-weight:400"><input type="checkbox" id="gkbEnabled" checked> Tema activo en el chat</label></div>
-    <div class="form-group full" style="display:flex;gap:.5rem;justify-content:flex-end">
-      <button type="button" class="btn btn-secondary" data-close="modalGadgetKB">Cancelar</button>
-      <button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar tema</button>
-    </div>
-  </form>
-</div></div>
-
-<div class="modal-overlay" id="modalKnowledge"><div class="modal">
-  <div class="modal-header"><h3 id="knowledgeModalTitle">Nuevo Conocimiento</h3><button class="modal-close" data-close="modalKnowledge">×</button></div>
-  <form id="knowledgeForm" class="form-grid">
-    <input type="hidden" id="kEditId">
-    <div class="form-group full"><label>Pregunta *</label><input type="text" id="kPregunta" required></div>
-    <div class="form-group full"><label>Respuesta *</label><textarea id="kRespuesta" required></textarea></div>
-    <div class="form-group"><label>Palabras Clave</label><input type="text" id="kKeywords" placeholder="Separadas por coma"></div>
-    <div class="form-group"><label>Categoría</label><select id="kCategoria"></select></div>
-    <div class="form-group full" style="display:flex;gap:.5rem;justify-content:flex-end">
-      <button type="button" class="btn btn-secondary" data-close="modalKnowledge">Cancelar</button>
-      <button type="submit" class="btn btn-primary">Guardar</button>
-    </div>
-  </form>
-</div></div>
-
-<div class="modal-overlay" id="modalUser"><div class="modal">
-  <div class="modal-header"><h3 id="userModalTitle">Nuevo Usuario</h3><button class="modal-close" data-close="modalUser">×</button></div>
-  <form id="userForm" class="form-grid">
-    <input type="hidden" id="uEditId">
-    <div class="form-group"><label>Nombre *</label><input type="text" id="uNombre" required></div>
-    <div class="form-group"><label>Email *</label><input type="email" id="uEmail" required></div>
-    <div class="form-group"><label>Rol *</label><select id="uRol" required></select></div>
-    <div class="form-group"><label>Departamento</label><input type="text" id="uDepto"></div>
-    <div class="form-group full" style="display:flex;gap:.5rem;justify-content:flex-end">
-      <button type="button" class="btn btn-secondary" data-close="modalUser">Cancelar</button>
-      <button type="submit" class="btn btn-primary">Guardar</button>
-    </div>
-  </form>
-</div></div>
-
-<div class="toast-container" id="toastContainer"></div>
 
 <script>
 /* ═══════════════════════════════════════════════════════════════
@@ -5204,6 +5232,7 @@ const SettingsModule = {
   renderPortalMascot() {
     const el = document.getElementById('clientArturitoMascot');
     if (!el) return;
+    if (el.querySelector('svg')) return;
     if (typeof ArturitoModule !== 'undefined' && ArturitoModule.injectArturitoSvg) {
       ArturitoModule.injectArturitoSvg(el, 'portal');
     } else {
@@ -7483,7 +7512,7 @@ function registerArturitoServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   var scope = location.pathname.replace(/[^/]*$/, '') || '/';
   var swCode = [
-    "const CACHE_NAME='arturito-ai-v8';",
+    "const CACHE_NAME='arturito-ai-v9';",
     "self.addEventListener('install',function(e){",
     "var SCOPE=self.registration.scope;",
     "var OFFLINE=[SCOPE,new URL('index.html',SCOPE).href,",
@@ -7550,15 +7579,53 @@ const App = {
       SettingsModule.apply();
     }
   },
-  /** Inicializa toda la aplicación */
+  /** Inicializa toda la aplicación (UI primero, nube/RAG en segundo plano) */
   async init() {
     window.database = database;
     const boot = DatabaseModule.init();
+
+    window.KnowledgeBaseModule = KnowledgeBaseModule;
+    KnowledgeBaseModule.syncFromGadget();
+
+    SettingsModule.applyPortal();
+    ArturitoModule.init();
+    AuthModule.init();
+    GadgetModule.init();
+    ChatModule.init();
+    ChatModule.applyLiveSettings();
+    SettingsModule.init();
+    TicketModule.init();
+    TrainingModule.init();
+    UserModule.init();
+    AdminModule.init();
+    ReportModule.init();
+    NavModule.init();
+    hydrateIcons();
+    wrapSearchBoxes();
+
+    window.TicketModule = TicketModule;
+    window.ChatModule = ChatModule;
+    window.TrainingModule = TrainingModule;
+    window.KnowledgeModule = TrainingModule;
+    window.UserModule = UserModule;
+
+    if (AuthModule.checkSession()) this.setMode('admin');
+    else this.setMode('client');
+
+    registerArturitoServiceWorker();
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible' || typeof ArturitoCloud === 'undefined' || !ArturitoCloud.store) return;
+      void ArturitoCloud.store.refreshFromCloud(database, (type) => App.applyCloudUpdate(type));
+    });
+
+    void this._initHeavy(boot);
+  },
+  /** Carga IndexedDB, Firebase y el índice RAG sin bloquear el portal */
+  async _initHeavy(boot) {
     const purgedPilot = boot?.purged;
     const repairedKB = boot?.repaired;
     await IDBModule.init();
-
-    window.KnowledgeBaseModule = KnowledgeBaseModule;
 
     const cloudHandlers = {
       onSync: (type) => { void App.applyCloudUpdate(type); },
@@ -7592,38 +7659,10 @@ const App = {
     KnowledgeBaseModule.syncFromGadget();
     await RAGModule.rebuildIndex();
     SettingsModule.apply();
-    ArturitoModule.init();
-    AuthModule.init();
-    GadgetModule.init();
-    ChatModule.init();
     ChatModule.applyLiveSettings();
-    SettingsModule.init();
-    TicketModule.init();
-    TrainingModule.init();
-    UserModule.init();
-    AdminModule.init();
-    ReportModule.init();
-    NavModule.init();
-    hydrateIcons();
-    wrapSearchBoxes();
 
-    window.TicketModule = TicketModule;
-    window.ChatModule = ChatModule;
-    window.TrainingModule = TrainingModule;
-    window.KnowledgeModule = TrainingModule;
-    window.UserModule = UserModule;
-
-    if (AuthModule.checkSession()) this.setMode('admin');
-    else this.setMode('client');
     if (purgedPilot) toast('Datos de prueba piloto eliminados de la memoria local', 'info');
     if (repairedKB) toast('Base de conocimiento restaurada desde la semilla original', 'success');
-
-    registerArturitoServiceWorker();
-
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState !== 'visible' || typeof ArturitoCloud === 'undefined' || !ArturitoCloud.store) return;
-      void ArturitoCloud.store.refreshFromCloud(database, (type) => App.applyCloudUpdate(type));
-    });
 
     const cloudOn = typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled?.();
     console.log('ARTURITO AI — Modo:', this.mode, '| Cloud:', cloudOn || false, '| Temas indexados:', RAGModule.index.length);
