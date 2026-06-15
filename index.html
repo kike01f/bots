@@ -381,6 +381,8 @@ body.mode-client #adminApp{display:none!important}
 .chat-msg-body strong{color:inherit}
 .chat-msg-row.propio .chat-msg-body strong{color:#fff}
 .chat-msg-body a{font-weight:600;color:var(--arturito-green)}
+.chat-msg-body a.chat-external-link{color:var(--arturito-green-dark,#5a8501);text-decoration:underline;text-underline-offset:2px;cursor:pointer;word-break:break-all}
+.chat-msg-body a.chat-external-link:hover{opacity:.88}
 .chat-msg-row.propio .chat-msg-body a{color:#fff;text-decoration:underline}
 .chat-msg-meta{display:flex;justify-content:flex-end;margin-top:.2rem}
 .chat-msg-time{font-size:.62rem;opacity:.85}
@@ -4345,12 +4347,44 @@ function readFileBuffer(file) {
   return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsArrayBuffer(file); });
 }
 function stripHtmlTags(str) { return String(str).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(); }
-/** Formatea texto del bot: markdown básico a HTML seguro */
+/** Formatea texto del bot: markdown básico + enlaces clicables */
 function formatBotText(text) {
-  return escapeHtml(String(text || ''))
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\[(.+?)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" style="color:var(--arturito-green-dark,#5a8501)">$1</a>')
-    .replace(/\n/g, '<br>');
+  const raw = escapeHtml(String(text || ''));
+  const linkSlots = [];
+  const addLink = (href, label) => {
+    const safeHref = String(href || '').trim().replace(/"/g, '&quot;');
+    const safeLabel = String(label || href || '').trim();
+    if (!/^https?:\/\//i.test(safeHref)) return safeLabel;
+    const idx = linkSlots.length;
+    linkSlots.push(
+      `<a href="${safeHref}" class="chat-external-link" target="_blank" rel="noopener noreferrer">${safeLabel}</a>`
+    );
+    return `\x00LNK${idx}\x00`;
+  };
+  const trimUrlTail = (url) => url.replace(/[.,;:!?]+$/g, '');
+
+  let out = raw.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+  out = out.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) =>
+    addLink(trimUrlTail(url), label.trim())
+  );
+
+  out = out.replace(/(^|[\s(>])(https?:\/\/[^\s<>"']+)/g, (match, before, url, offset, str) => {
+    if (/\x00LNK\d+\x00/.test(match)) return match;
+    const prev = str.slice(Math.max(0, offset - 8), offset);
+    if (/href="$/i.test(prev) || /"\x00$/.test(prev)) return match;
+    const clean = trimUrlTail(url);
+    return before + addLink(clean, clean);
+  });
+
+  out = out.replace(/(^|[\s(>])(www\.[^\s<>"']+)/gi, (match, before, url, offset, str) => {
+    if (/\x00LNK\d+\x00/.test(match)) return match;
+    const clean = trimUrlTail(url);
+    return before + addLink('https://' + clean, clean);
+  });
+
+  out = out.replace(/\x00LNK(\d+)\x00/g, (_, i) => linkSlots[parseInt(i, 10)] || '');
+  return out.replace(/\n/g, '<br>');
 }
 /** Formatea texto del portal principal (negrita y saltos de línea) */
 function formatPortalText(text) {
