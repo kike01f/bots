@@ -6454,8 +6454,84 @@ const ResponseEngine = {
     ANSWER: 0.48,
     CONFIDENT: 0.60,
     SUGGEST: 0.14,
+    SUGGEST_AFFINITY: 0.24,
     MARGIN: 0.09,
     RAG_DOC: 0.10
+  },
+
+  /** Consulta con contenido real (no saludo vacío) */
+  hasSubstantiveQuery(query) {
+    const q = String(query || '').trim();
+    if (!q) return false;
+    if (QueryUnderstandingModule.coreTokens(q).length >= 1) return true;
+    return QueryUnderstandingModule.stripFillers(q).length >= 8;
+  },
+
+  /** Señales mínimas para recomendar un tema relacionado con la pregunta */
+  passesAffinityGate(query, sig, score = 0) {
+    if (!sig) return false;
+    const T = this.THRESHOLDS;
+    const strong =
+      sig.titleOverlap >= 0.25 ||
+      sig.keywordHits >= 1 ||
+      sig.strongSignals >= 1;
+    if (!strong) return false;
+    if (sig.contentOverlap > 0.22 && sig.titleOverlap < 0.15 && sig.keywordHits === 0) return false;
+
+    const meetsScore = score >= T.SUGGEST_AFFINITY
+      || sig.titleOverlap >= 0.32
+      || sig.keywordHits >= 2
+      || sig.strongSignals >= 2;
+    if (!meetsScore) return false;
+
+    const queryDomain = QueryUnderstandingModule.detectDomain(query);
+    if (!queryDomain) return true;
+
+    const domainSyns = RAGModule.SYNONYMS[queryDomain] || [];
+    const domainTokens = [queryDomain, ...domainSyns.map((s) => QueryUnderstandingModule.normalize(s))];
+    const blob = QueryUnderstandingModule.normalize(
+      `${sig._title || ''} ${(sig._keywords || []).join(' ')} ${sig._question || ''}`
+    );
+    const domainHit = domainTokens.some((d) => d.length > 2 && blob.includes(d));
+    return domainHit || sig.titleOverlap >= 0.38 || sig.keywordHits >= 2;
+  },
+
+  /** Evalúa si un tema sugerido es realmente afín a la consulta */
+  isTopicAffin(query, topic) {
+    if (!this.hasSubstantiveQuery(query)) return true;
+
+    const title = String(topic.title || topic.question || '').trim();
+    if (!title) return false;
+
+    let entry = null;
+    if (topic.knowledgeId) {
+      entry = (database.knowledge || []).find((k) => k.id === topic.knowledgeId);
+    }
+    if (!entry && topic.id) {
+      entry = (database.knowledge || []).find((k) => k.gadgetId === topic.id || k.id === topic.id);
+    }
+    if (!entry) {
+      entry = (database.knowledge || []).find((k) => k.pregunta === title);
+    }
+
+    if (entry) {
+      const sig = topic.signals || QueryUnderstandingModule.scoreKnowledgeEntry(entry, query);
+      const gadgetEntry = entry.gadgetId ? GadgetKBModule.getById(entry.gadgetId) : null;
+      const enriched = {
+        ...sig,
+        _title: entry.pregunta,
+        _question: gadgetEntry?.question || entry.question || '',
+        _keywords: KnowledgeBaseModule.getKeywords(entry)
+      };
+      return this.passesAffinityGate(query, enriched, topic.score ?? sig.score);
+    }
+
+    const qTokens = QueryUnderstandingModule.coreTokens(query);
+    const titleOverlap = QueryUnderstandingModule.tokenOverlapScore(qTokens, title);
+    const score = topic.score || 0;
+    if (titleOverlap >= 0.28 && score >= 0.12) return true;
+    if (titleOverlap >= 0.18 && score >= 0.30) return true;
+    return (topic.coreOverlap || 0) >= 0.32 && score >= this.THRESHOLDS.SUGGEST_AFFINITY;
   },
   /** Detecta intención del mensaje */
   analyzeIntent(text, conv) {
@@ -6612,11 +6688,12 @@ const ResponseEngine = {
       if (!title || title === excludeTitle) return;
       const key = (item.id || title).toLowerCase();
       if (seen.has(key)) return;
+      if (!this.isTopicAffin(query, item)) return;
       seen.add(key);
       results.push(item);
     };
 
-    const fromKnowledge = (entry, score) => {
+    const fromKnowledge = (entry, score, signals) => {
       const gadgetId = entry.gadgetId || null;
       const gEntry = gadgetId ? GadgetKBModule.getById(gadgetId) : null;
       push({
@@ -6625,26 +6702,32 @@ const ResponseEngine = {
         title: entry.pregunta,
         question: gEntry?.question || entry.pregunta,
         icon: entry.icon || gEntry?.icon || '💡',
-        score
+        score,
+        signals
       });
     };
 
     QueryUnderstandingModule.queryVariants(query).forEach((q) => {
-      KnowledgeBaseModule.searchRanked(q, this.THRESHOLDS.SUGGEST, 8).forEach(({ entry, score }) => fromKnowledge(entry, score));
+      KnowledgeBaseModule.searchRanked(q, this.THRESHOLDS.SUGGEST, 10).forEach(({ entry, score, ...signals }) => {
+        fromKnowledge(entry, score, signals);
+      });
     });
 
     QueryUnderstandingModule.queryVariants(query).forEach((q) => {
       RAGModule.search(q, 6).forEach((r) => {
-        if (r.score < 0.04) return;
+        if (r.score < 0.06) return;
         const kMatch = (database.knowledge || []).find((k) => k.pregunta === r.title || k.id === r.docId);
-        if (kMatch) fromKnowledge(kMatch, r.score);
-        else if ((r.coreOverlap || 0) >= 0.22) {
+        if (kMatch) {
+          const sig = QueryUnderstandingModule.scoreKnowledgeEntry(kMatch, query);
+          fromKnowledge(kMatch, Math.max(r.score, sig.score), sig);
+        } else if ((r.coreOverlap || 0) >= 0.30) {
           push({
             id: r.id || r.docId || r.title,
             title: r.title,
             question: r.title,
             icon: '📄',
-            score: r.score
+            score: r.score,
+            coreOverlap: r.coreOverlap
           });
         }
       });
@@ -6703,22 +6786,26 @@ const ResponseEngine = {
       conv = null,
       existing = null,
       mode = 'companion',
-      minCount = 3,
       maxCount = 4
     } = opts;
     if (!text) return { text, topicSuggestions: existing || null };
 
     const excludeTitle = match?.title || match?.raw?.pregunta || '';
     const recentIds = this.getRecentSuggestedIds(conv);
-    let suggestions = (existing || []).filter((s) => s.id && !recentIds.has(s.id));
+    const substantive = this.hasSubstantiveQuery(query);
 
-    if (suggestions.length < minCount) {
-      const extra = this.collectRelatedTopics(query, excludeTitle, 8)
+    let suggestions = (existing || [])
+      .filter((s) => s.id && !recentIds.has(s.id))
+      .filter((s) => s.title !== excludeTitle)
+      .filter((s) => !substantive || this.isTopicAffin(query, s));
+
+    if (substantive && suggestions.length < maxCount) {
+      const extra = this.collectRelatedTopics(query, excludeTitle, maxCount + 2)
         .filter((s) => !recentIds.has(s.id) && !suggestions.some((x) => x.id === s.id));
       suggestions = suggestions.concat(extra);
     }
 
-    if (suggestions.length < minCount && (mode === 'companion' || !query.trim())) {
+    if (!substantive && suggestions.length < maxCount) {
       const popular = this.getPopularTopics(maxCount, recentIds, excludeTitle)
         .filter((s) => !suggestions.some((x) => x.id === s.id));
       suggestions = suggestions.concat(popular);
