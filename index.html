@@ -716,19 +716,6 @@ body.mode-client #adminApp{display:none!important}
 </div>
 <script>
 (function(){
-  try {
-    var d = JSON.parse(localStorage.getItem('arturito_ai_database')||'{}');
-    var s = d.settings;
-    if (s) {
-      var el;
-      if (s.buildingName) { el = document.getElementById('clientBuildingName'); if (el) el.textContent = s.buildingName; }
-      if (s.portalTagline) { el = document.getElementById('clientTagline'); if (el) el.textContent = s.portalTagline; }
-      if (s.portalHint) {
-        el = document.getElementById('clientHint');
-        if (el) el.innerHTML = String(s.portalHint).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
-      }
-    }
-  } catch(e){}
   var bg = document.querySelector('.client-portal-bg');
   if (bg) {
     var img = new Image();
@@ -3044,21 +3031,18 @@ const ARTURITO_GADGET_KB_SEED = [
 
     settingsFingerprint(settings) {
       const s = settings || {};
-      return [
-        s.updatedAt || 0,
-        s.buildingName || '',
-        s.botName || '',
-        s.welcomeMessage || '',
-        s.primaryColor || '',
-        s.theme || ''
-      ].join('|');
+      return CLOUD_SETTINGS_KEYS.map((key) => {
+        const v = s[key];
+        if (v && typeof v === 'object') return JSON.stringify(v);
+        return String(v ?? '');
+      }).join('|');
     }
 
     /** Descarga KB y settings públicos desde el servidor (sin caché) */
     async pullPublicCloudData(database, forceServer = true) {
-      if (!this.fb.isEnabled()) return false;
+      if (!this.fb.isEnabled()) return { settings: false, gadgetKB: false, knowledge: false };
       const { getDoc, getDocFromServer, getDocs, getDocsFromServer } = this.fb._modules;
-      let pulled = false;
+      const changes = { settings: false, gadgetKB: false, knowledge: false };
       const settingsRef = this.fb.doc(`condominios/${this._cid()}/settings/main`);
       try {
         let settingsSnap = null;
@@ -3069,7 +3053,7 @@ const ARTURITO_GADGET_KB_SEED = [
         if (settingsSnap.exists()) {
           const prevFp = this.settingsFingerprint(database.settings);
           database.settings = this.applyRemoteSettings(database.settings, settingsSnap.data());
-          if (this.settingsFingerprint(database.settings) !== prevFp) pulled = true;
+          if (this.settingsFingerprint(database.settings) !== prevFp) changes.settings = true;
           this._cacheLocal(database);
         }
 
@@ -3091,24 +3075,26 @@ const ARTURITO_GADGET_KB_SEED = [
             getDocs(this.fb.col('knowledge_base'))
           ]);
         }
-        if (gadgetSnap.size > 0) {
-          database.gadgetKB = gadgetSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          this._cloudKBActive = true;
-          pulled = true;
+        if (gadgetSnap.size > 0 || this._cloudKBActive) {
+          const remoteGadget = gadgetSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          if (JSON.stringify(remoteGadget) !== JSON.stringify(database.gadgetKB || [])) changes.gadgetKB = true;
+          database.gadgetKB = remoteGadget;
+          if (gadgetSnap.size > 0) this._cloudKBActive = true;
         }
-        if (manualSnap.size > 0) {
-          database.manualKnowledge = manualSnap.docs.map((d) => this.mapManualFromCloud(d.id, d.data()));
-          this._cloudKBActive = true;
-          pulled = true;
+        if (manualSnap.size > 0 || this._cloudKBActive) {
+          const remoteManual = manualSnap.docs.map((d) => this.mapManualFromCloud(d.id, d.data()));
+          if (JSON.stringify(remoteManual) !== JSON.stringify(database.manualKnowledge || [])) changes.knowledge = true;
+          database.manualKnowledge = remoteManual;
+          if (manualSnap.size > 0) this._cloudKBActive = true;
         }
-        if (pulled) {
+        if (changes.gadgetKB || changes.knowledge) {
           this.applyUnifiedKnowledge(database);
           this._cacheLocal(database);
         }
       } catch (err) {
         console.warn('[CloudSync] pullPublicCloudData:', err);
       }
-      return pulled;
+      return changes;
     }
 
     async syncSettings(settings) {
@@ -3283,6 +3269,7 @@ const ARTURITO_GADGET_KB_SEED = [
           const remote = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           if (!remote.length && !this._cloudKBActive && (database.gadgetKB?.length || 0) > 0) return;
           if (remote.length) this._cloudKBActive = true;
+          if (JSON.stringify(remote) === JSON.stringify(database.gadgetKB || [])) return;
           this._syncing = true;
           database.gadgetKB = remote;
           this.applyUnifiedKnowledge(database);
@@ -3301,6 +3288,7 @@ const ARTURITO_GADGET_KB_SEED = [
           const remote = snap.docs.map((d) => this.mapManualFromCloud(d.id, d.data()));
           if (!remote.length && !this._cloudKBActive && (database.manualKnowledge?.length || 0) > 0) return;
           if (remote.length) this._cloudKBActive = true;
+          if (JSON.stringify(remote) === JSON.stringify(database.manualKnowledge || [])) return;
           this._syncing = true;
           database.manualKnowledge = remote;
           this.applyUnifiedKnowledge(database);
@@ -3449,12 +3437,15 @@ const ARTURITO_GADGET_KB_SEED = [
       return this.sync.migrateLocalToCloud(database);
     }
 
-    /** Refresca settings/KB desde servidor (p. ej. al volver a la app) */
+    /** Refresca settings/KB desde servidor (p. ej. al volver a la app o reconectar red) */
     async refreshFromCloud(database, onSync) {
       if (!this.fb.isEnabled()) return false;
-      const pulled = await this.sync.pullPublicCloudData(database, true);
-      if (pulled && onSync) onSync('settings');
-      return pulled;
+      const changes = await this.sync.pullPublicCloudData(database, true);
+      let synced = false;
+      if (changes.settings && onSync) { onSync('settings'); synced = true; }
+      if (changes.gadgetKB && onSync) { onSync('gadgetKB'); synced = true; }
+      if (changes.knowledge && onSync) { onSync('knowledge'); synced = true; }
+      return synced;
     }
   }
 
@@ -7616,6 +7607,11 @@ const App = {
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible' || typeof ArturitoCloud === 'undefined' || !ArturitoCloud.store) return;
+      void ArturitoCloud.store.refreshFromCloud(database, (type) => App.applyCloudUpdate(type));
+    });
+
+    window.addEventListener('online', () => {
+      if (typeof ArturitoCloud === 'undefined' || !ArturitoCloud.store) return;
       void ArturitoCloud.store.refreshFromCloud(database, (type) => App.applyCloudUpdate(type));
     });
 
