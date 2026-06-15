@@ -4106,6 +4106,17 @@ function renderLogoContent(logo) {
 const ARTURITO_PERSONALITY = {
   intros: ['Te cuento lo que sé:', 'Acá va la info:', 'Según el reglamento del edificio:', 'Buena pregunta — mira:'],
   closings: ['¿Te sirvió? Si necesitas más detalle, pregúntame nomás.', '¿Quedó claro? Estoy acá para lo que necesites.', 'Espero haberte ayudado. ¿Algo más?'],
+  companionIntros: [
+    '**También te puede interesar:**',
+    '**Por si te sirve, estos temas están relacionados:**',
+    '**¿Quieres explorar algo más? Toca un tema:**',
+    '**Sigo acá contigo — estos temas suelen consultarse:**'
+  ],
+  noAnswerIntros: [
+    '**Estos temas podrían ayudarte:**',
+    '**Quizás alguno de estos temas responde tu consulta:**',
+    '**No tengo la respuesta exacta, pero mira si alguno de estos temas te sirve:**'
+  ],
   lowConfidence: ['Encontré algo parecido, aunque no estoy 100% seguro.', 'Tengo una pista, pero confirmemos si te calza:', 'Esto se acerca a tu pregunta — revísalo por si acaso:'],
   thinking: ['Déjame revisar eso...', 'Un segundito, busco en mi memoria...', 'Déjame ver qué tengo...'],
   fallbacks: [
@@ -5244,7 +5255,7 @@ const RAGModule = {
       qTokens.filter(t => t.length > 3).forEach(q => {
         if (titleTokens.some(t => t === q || t.startsWith(q) || q.startsWith(t))) titleScore += 0.12;
       });
-      if (item.source === 'manual' && item.title.toLowerCase().includes(qLower.substring(0, Math.min(12, qLower.length)))) titleScore += 0.35;
+      if (item.source === 'manual' && item.title.toLowerCase().includes(qLower.substring(0, Math.min(12, qLower.length)))) titleScore += 0.22;
 
       let coreOverlap = 0;
       if (typeof QueryUnderstandingModule !== 'undefined' && qCore.length) {
@@ -5261,9 +5272,9 @@ const RAGModule = {
         }
       });
 
-      const score = tfidfScore * 0.36 + embedScore * 0.28 + kwScore + titleScore + coreOverlap * 0.32 + questionBoost;
+      const score = tfidfScore * 0.38 + embedScore * 0.28 + kwScore + titleScore + coreOverlap * 0.28 + questionBoost;
       return { ...item, score, tfidfScore, embedScore, coreOverlap };
-    }).filter(r => r.score > 0.02).sort((a,b) => b.score - a.score).slice(0, topK);
+    }).filter(r => r.score > 0.04).sort((a,b) => b.score - a.score).slice(0, topK);
 
     return results;
   },
@@ -5560,7 +5571,7 @@ const GadgetKBModule = {
       const combined = Math.max(score / 10, semantic);
       if (combined > bestScore) { bestScore = combined; best = entry; }
     });
-    if (best && bestScore >= 0.28) {
+    if (best && bestScore >= 0.38) {
       return { entry: best, score: bestScore, response: this.formatResponse(best.response, text), source: 'gadget' };
     }
     const partial = entries.map(e => {
@@ -5789,7 +5800,7 @@ const KnowledgeBaseModule = {
   },
 
   /** Mejor coincidencia en base manual unificada */
-  search(query, minScore = 0.18) {
+  search(query, minScore = 0.22) {
     let best = null, bestScore = 0;
     this.getEnabled().forEach(entry => {
       const { score } = this.scoreEntry(entry, query);
@@ -6356,54 +6367,81 @@ const QueryUnderstandingModule = {
   scoreKnowledgeEntry(entry, query) {
     const qNorm = this.normalize(query);
     const qCore = this.coreTokens(query);
-    const qExpanded = RAGModule.expandQueryTokens(this.stripFillers(query) || query);
-    const tokenSet = qCore.length ? qCore : qExpanded;
+    const qTokens = qCore.length ? qCore : RAGModule.expandQueryTokens(this.stripFillers(query) || query);
 
     const title = entry.pregunta || entry.title || '';
     const content = entry.respuesta || entry.response || entry.content || '';
     const keywords = KnowledgeBaseModule.getKeywords(entry);
-    const category = entry.categoria || entry.category || '';
     const gadgetEntry = entry.gadgetId ? GadgetKBModule.getById(entry.gadgetId) : null;
     const questionField = gadgetEntry?.question || entry.question || '';
 
-    const kwResult = GadgetKBModule.calculateMatchScore(query, keywords);
-    let score = Math.min(1, kwResult.score / 10);
-
-    const titleOverlap = this.tokenOverlapScore(tokenSet, title);
-    score = Math.max(score, titleOverlap * 0.96);
-
-    const questionOverlap = questionField ? this.tokenOverlapScore(tokenSet, questionField) : 0;
-    score = Math.max(score, questionOverlap * 0.94);
-
-    const contentOverlap = this.tokenOverlapScore(tokenSet, content);
-    score = Math.max(score, contentOverlap * 0.42);
-
-    if (category) {
-      const catNorm = this.normalize(category);
-      if (catNorm.length > 3 && (qNorm.includes(catNorm) || this.tokenOverlapScore(tokenSet, category) > 0.4)) {
-        score = Math.max(score, 0.38);
-      }
+    if (!qTokens.length && qNorm.length < 6) {
+      return { score: 0, rawScore: 0, matches: 0, titleOverlap: 0, contentOverlap: 0, keywordHits: 0 };
     }
+
+    const titleOverlap = this.tokenOverlapScore(qTokens, title);
+    const questionOverlap = questionField ? this.tokenOverlapScore(qTokens, questionField) : 0;
+    const contentOverlap = this.tokenOverlapScore(qTokens, content);
+    const kwResult = GadgetKBModule.calculateMatchScore(query, keywords, `${title} ${questionField}`);
+    const kwNorm = Math.min(1, kwResult.score / 10);
+
+    let score = (titleOverlap * 0.42) + (questionOverlap * 0.28) + (kwNorm * 0.22) + (contentOverlap * 0.08);
 
     const titleNorm = this.normalize(title);
-    if (titleNorm.length > 5) {
-      if (qNorm === titleNorm) score = Math.max(score, 0.98);
-      else if (qNorm.includes(titleNorm) || titleNorm.includes(qNorm)) score = Math.max(score, 0.76);
+    if (titleNorm.length > 4 && qNorm === titleNorm) score = Math.max(score, 0.96);
+    else if (titleOverlap >= 0.72) score = Math.max(score, 0.82);
+    else if (titleOverlap >= 0.55 && kwResult.matches >= 1) score = Math.max(score, 0.68);
+
+    const qEmbed = RAGModule.hashEmbed(qTokens);
+    const entryTokens = RAGModule.tokenize(`${title} ${questionField} ${keywords.join(' ')}`);
+    const semantic = RAGModule.cosineSim(qEmbed, RAGModule.hashEmbed(entryTokens));
+    if (titleOverlap >= 0.25 || kwResult.matches >= 1) {
+      score = Math.max(score, semantic * 0.38);
     }
 
-    const qEmbed = RAGModule.hashEmbed(qExpanded);
-    const entryTokens = RAGModule.tokenize(`${title} ${content} ${keywords.join(' ')} ${questionField}`);
-    const eEmbed = RAGModule.hashEmbed(entryTokens);
-    score = Math.max(score, RAGModule.cosineSim(qEmbed, eEmbed) * 0.9);
+    const strongSignals =
+      (titleOverlap >= 0.42 ? 1 : 0) +
+      (questionOverlap >= 0.42 ? 1 : 0) +
+      (kwResult.matches >= 1 ? 1 : 0) +
+      (kwResult.matches >= 2 ? 1 : 0);
 
-    if (Array.isArray(entry.suggestedQuestions)) {
-      entry.suggestedQuestions.forEach((sq) => {
-        const sqScore = this.tokenOverlapScore(tokenSet, sq);
-        if (sqScore > 0.45) score = Math.max(score, sqScore * 0.93);
+    if (strongSignals === 0) score *= 0.45;
+    if (contentOverlap > 0.25 && titleOverlap < 0.18 && kwResult.matches === 0) score *= 0.35;
+
+    const queryDomain = this.detectDomain(query);
+    const entryBlob = this.normalize(`${title} ${keywords.join(' ')} ${questionField}`);
+    if (queryDomain && !entryBlob.includes(queryDomain)) {
+      const domainSyns = RAGModule.SYNONYMS[queryDomain] || [];
+      const domainHit = domainSyns.some((s) => entryBlob.includes(this.normalize(s)));
+      if (!domainHit && score < 0.72) score *= 0.55;
+    }
+
+    return {
+      score: Math.min(1, score),
+      rawScore: kwResult.score,
+      matches: kwResult.matches,
+      titleOverlap,
+      contentOverlap,
+      keywordHits: kwResult.matches,
+      strongSignals
+    };
+  },
+
+  detectDomain(query) {
+    const tokens = this.coreTokens(query);
+    const norm = this.normalize(query);
+    let bestDomain = null;
+    let bestScore = 0;
+    Object.entries(RAGModule.SYNONYMS).forEach(([domain, syns]) => {
+      let s = 0;
+      if (tokens.includes(domain) || norm.includes(domain)) s += 2;
+      syns.forEach((syn) => {
+        const sn = this.normalize(syn);
+        if (tokens.some((t) => t.includes(sn) || sn.includes(t)) || norm.includes(sn)) s += 1;
       });
-    }
-
-    return { score: Math.min(1, score), rawScore: kwResult.score, matches: kwResult.matches, titleOverlap, contentOverlap };
+      if (s > bestScore) { bestScore = s; bestDomain = domain; }
+    });
+    return bestScore >= 2 ? bestDomain : null;
   }
 };
 
@@ -6411,6 +6449,14 @@ const QueryUnderstandingModule = {
 const ResponseEngine = {
   FOLLOW_UP: /^(y |pero |también|tambien|ok |cuál|cual|como|cómo|donde|dónde|cuando|cuándo|eso|esa|ese|allí|alli|ahí|ahi|mas|más|otra|otro|y eso|y eso\?|cuanto|cuánto)\b/i,
 
+  /** Umbrales de precisión — preferir no responder antes que inventar */
+  THRESHOLDS: {
+    ANSWER: 0.48,
+    CONFIDENT: 0.60,
+    SUGGEST: 0.14,
+    MARGIN: 0.09,
+    RAG_DOC: 0.10
+  },
   /** Detecta intención del mensaje */
   analyzeIntent(text, conv) {
     const t = String(text || '').trim().toLowerCase();
@@ -6426,83 +6472,128 @@ const ResponseEngine = {
     return 'question';
   },
 
-  /** Enriquece consulta con contexto conversacional y limpia lenguaje coloquial */
+  /** Enriquece consulta solo en seguimientos claros (evita mezclar preguntas distintas) */
   buildContextualQuery(text, conv) {
     const cleaned = QueryUnderstandingModule.stripFillers(text) || text.trim();
     const users = (conv?.messages || []).filter(m => m.type === 'user').map(m => m.text);
     if (users.length <= 1) return cleaned;
 
+    const isFollowUp = cleaned.length < 45 || this.FOLLOW_UP.test(text);
+    if (!isFollowUp) return cleaned;
+
     const bots = (conv?.messages || []).filter(m => m.type === 'bot' && m.topicTitle);
     const lastTopic = bots.length ? bots[bots.length - 1].topicTitle : '';
-    const prev = users[users.length - 2];
-    const isFollowUp = cleaned.length < 50 || this.FOLLOW_UP.test(text);
-
-    if (isFollowUp || !RAGModule.search(cleaned, 1).length) {
-      return QueryUnderstandingModule.stripFillers([lastTopic, prev, cleaned].filter(Boolean).join(' '));
+    if (lastTopic) {
+      return QueryUnderstandingModule.stripFillers(`${lastTopic} ${cleaned}`);
     }
     return cleaned;
   },
 
-  /** Busca la mejor coincidencia probando variantes de la pregunta */
-  searchBestKnowledge(query) {
-    const variants = QueryUnderstandingModule.queryVariants(query);
-    let best = null;
-    variants.forEach((q) => {
-      const ranked = KnowledgeBaseModule.searchRanked(q, 0.16, 3);
-      ranked.forEach(({ entry, score }) => {
-        const candidate = {
+  /** Valida que el match sea coherente con la pregunta antes de responder */
+  validateMatch(query, match) {
+    if (!match) return false;
+    const T = this.THRESHOLDS;
+    const qCore = QueryUnderstandingModule.coreTokens(query);
+
+    if (match.source === 'manual' || match.fullContent) {
+      const sig = match.signals || (match.raw
+        ? QueryUnderstandingModule.scoreKnowledgeEntry(match.raw, query)
+        : null);
+      if (sig) {
+        if (sig.titleOverlap >= 0.38) return true;
+        if (sig.matches >= 1 && match.score >= T.ANSWER) return true;
+        if (sig.strongSignals >= 2 && match.score >= T.ANSWER - 0.04) return true;
+      }
+      if (qCore.length <= 1) return match.score >= 0.68;
+      return match.score >= 0.58;
+    }
+
+    if (match.ragResults?.length) {
+      const top = match.ragResults[0];
+      const overlap = top.coreOverlap || 0;
+      return overlap >= 0.30 && match.score >= 0.40;
+    }
+
+    return match.score >= 0.62;
+  },
+
+  /** Recupera candidatos y elige solo si hay confianza y margen suficientes */
+  retrieve(query) {
+    const T = this.THRESHOLDS;
+    const seen = new Set();
+    const candidates = [];
+
+    const push = (candidate) => {
+      const key = (candidate.title || candidate.id || '').toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      candidates.push(candidate);
+    };
+
+    QueryUnderstandingModule.queryVariants(query).forEach((q) => {
+      KnowledgeBaseModule.searchRanked(q, T.SUGGEST, 6).forEach(({ entry, score, ...signals }) => {
+        push({
           source: 'manual',
           score,
           title: entry.pregunta,
           content: entry.respuesta,
           category: entry.categoria,
           raw: entry,
-          fullContent: true
-        };
-        if (!best || candidate.score > best.score) best = candidate;
+          fullContent: true,
+          signals
+        });
       });
     });
-    return best;
-  },
-
-  /** Recupera la mejor fuente unificada (base manual + documentos RAG) */
-  retrieve(query) {
-    const manualMatch = this.searchBestKnowledge(query);
-
-    if (manualMatch && manualMatch.score >= 0.30) {
-      return manualMatch;
-    }
-
-    const candidates = [];
-    if (manualMatch) candidates.push(manualMatch);
 
     QueryUnderstandingModule.queryVariants(query).forEach((q) => {
-      const ragResults = RAGModule.search(q, 5);
-      if (!ragResults.length || ragResults[0].score < 0.05) return;
-      const top = ragResults[0];
-      const ragManual = top.source === 'manual';
-      candidates.push({
-        source: ragManual ? 'manual' : (top.source || 'document'),
-        score: ragManual ? Math.min(1, Math.max(top.score / 0.32, top.coreOverlap || 0, 0.48)) : Math.min(1, top.score / 0.4),
-        title: top.title,
-        content: top.content,
-        category: top.category,
-        raw: top,
-        fullContent: ragManual,
-        ragResults: ragManual ? undefined : ragResults
+      RAGModule.search(q, 5).forEach((top) => {
+        if (top.score < T.RAG_DOC) return;
+        const ragManual = top.source === 'manual';
+        const overlap = top.coreOverlap || 0;
+        const score = ragManual
+          ? Math.min(0.88, overlap * 0.65 + top.score * 0.25 + (top.keywordHits || 0) * 0.05)
+          : Math.min(0.72, top.score * 0.5 + overlap * 0.35);
+        if (score < T.SUGGEST) return;
+        const kMatch = ragManual
+          ? (database.knowledge || []).find((k) => k.pregunta === top.title || k.id === top.docId)
+          : null;
+        if (kMatch) {
+          const sig = QueryUnderstandingModule.scoreKnowledgeEntry(kMatch, query);
+          push({
+            source: 'manual',
+            score: Math.max(score, sig.score),
+            title: kMatch.pregunta,
+            content: kMatch.respuesta,
+            category: kMatch.categoria,
+            raw: kMatch,
+            fullContent: true,
+            signals: sig
+          });
+        } else if (!ragManual) {
+          push({
+            source: 'document',
+            score,
+            title: top.title,
+            content: top.content,
+            category: top.category,
+            raw: top,
+            fullContent: false,
+            ragResults: [top],
+            coreOverlap: overlap
+          });
+        }
       });
     });
 
     candidates.sort((a, b) => b.score - a.score);
-    const best = candidates[0] || null;
-    if (best && best.source === 'manual' && !best.fullContent) best.fullContent = true;
+    const best = candidates[0];
+    const second = candidates[1];
 
-    if (best && candidates.length > 1) {
-      const margin = best.score - candidates[1].score;
-      if (margin < 0.04 && manualMatch && manualMatch.score >= 0.22) {
-        return manualMatch;
-      }
-    }
+    if (!best || best.score < T.ANSWER) return null;
+    if (second && (best.score - second.score) < T.MARGIN && best.score < T.CONFIDENT) return null;
+    if (!this.validateMatch(query, best)) return null;
+
+    if (best.source === 'manual' && !best.fullContent) best.fullContent = true;
     return best;
   },
 
@@ -6539,15 +6630,15 @@ const ResponseEngine = {
     };
 
     QueryUnderstandingModule.queryVariants(query).forEach((q) => {
-      KnowledgeBaseModule.searchRanked(q, 0.05, 8).forEach(({ entry, score }) => fromKnowledge(entry, score));
+      KnowledgeBaseModule.searchRanked(q, this.THRESHOLDS.SUGGEST, 8).forEach(({ entry, score }) => fromKnowledge(entry, score));
     });
 
     QueryUnderstandingModule.queryVariants(query).forEach((q) => {
       RAGModule.search(q, 6).forEach((r) => {
-        if (r.score < 0.02) return;
+        if (r.score < 0.04) return;
         const kMatch = (database.knowledge || []).find((k) => k.pregunta === r.title || k.id === r.docId);
         if (kMatch) fromKnowledge(kMatch, r.score);
-        else {
+        else if ((r.coreOverlap || 0) >= 0.22) {
           push({
             id: r.id || r.docId || r.title,
             title: r.title,
@@ -6559,36 +6650,107 @@ const ResponseEngine = {
       });
     });
 
-    if (results.length < limit) {
-      GadgetKBModule.getEntries()
-        .filter((e) => e.enabled !== false)
-        .slice(0, 8)
-        .forEach((e) => {
-          push({
-            id: e.id,
-            title: e.title,
-            question: e.question || e.title,
-            icon: e.icon || '💡',
-            score: 0.04
-          });
-        });
-    }
-
     return results
+      .filter((r) => (r.score || 0) >= this.THRESHOLDS.SUGGEST)
       .sort((a, b) => (b.score || 0) - (a.score || 0))
       .slice(0, limit);
   },
 
-  /** Mensaje cuando no hay respuesta exacta, con sugerencias clicables */
+  /** Mensaje cuando no hay respuesta exacta */
   buildNoAnswerResponse(query, fallbackText, excludeTitle = '') {
     const related = this.collectRelatedTopics(query, excludeTitle, 5);
-    let text = fallbackText;
-    if (related.length) {
-      text += '\n\n**Estos temas podrían ayudarte:**\nToca uno para ver la respuesta.';
-    } else {
-      text += '\n\nPuedes explorar el menú de temas o crear una solicitud al equipo.';
+    return {
+      text: related.length
+        ? 'No tengo una respuesta exacta para esa consulta en mi base de conocimiento.'
+        : fallbackText,
+      topicSuggestions: related,
+      partial: true,
+      companionMode: 'no_answer'
+    };
+  },
+
+  /** IDs de temas ya sugeridos recientemente (evita repetir) */
+  getRecentSuggestedIds(conv) {
+    const ids = new Set();
+    (conv?.messages || []).slice(-8).forEach((m) => {
+      if (m.type === 'bot' && m.topicSuggestions?.length) {
+        m.topicSuggestions.forEach((s) => { if (s.id) ids.add(s.id); });
+      }
+    });
+    return ids;
+  },
+
+  /** Temas populares / de respaldo para acompañar al usuario */
+  getPopularTopics(limit = 4, excludeIds = new Set(), excludeTitle = '') {
+    return GadgetKBModule.getEntries()
+      .filter((e) => e.enabled !== false && !excludeIds.has(e.id) && e.title !== excludeTitle)
+      .slice(0, limit)
+      .map((e) => ({
+        id: e.id,
+        title: e.title,
+        question: e.question || e.title,
+        icon: e.icon || '💡',
+        score: 0.03
+      }));
+  },
+
+  /** Agrega sugerencias clicables de forma proactiva (tono de acompañamiento) */
+  attachCompanionSuggestions(opts) {
+    const {
+      text,
+      query = '',
+      match = null,
+      conv = null,
+      existing = null,
+      mode = 'companion',
+      minCount = 3,
+      maxCount = 4
+    } = opts;
+    if (!text) return { text, topicSuggestions: existing || null };
+
+    const excludeTitle = match?.title || match?.raw?.pregunta || '';
+    const recentIds = this.getRecentSuggestedIds(conv);
+    let suggestions = (existing || []).filter((s) => s.id && !recentIds.has(s.id));
+
+    if (suggestions.length < minCount) {
+      const extra = this.collectRelatedTopics(query, excludeTitle, 8)
+        .filter((s) => !recentIds.has(s.id) && !suggestions.some((x) => x.id === s.id));
+      suggestions = suggestions.concat(extra);
     }
-    return { text, topicSuggestions: related };
+
+    if (suggestions.length < minCount && (mode === 'companion' || !query.trim())) {
+      const popular = this.getPopularTopics(maxCount, recentIds, excludeTitle)
+        .filter((s) => !suggestions.some((x) => x.id === s.id));
+      suggestions = suggestions.concat(popular);
+    }
+
+    suggestions = suggestions.slice(0, maxCount);
+    if (!suggestions.length) return { text, topicSuggestions: null };
+
+    const introPool = mode === 'no_answer'
+      ? (ARTURITO_PERSONALITY.noAnswerIntros || [])
+      : (ARTURITO_PERSONALITY.companionIntros || []);
+    const intro = ARTURITO_PERSONALITY.pick(introPool.length ? introPool : ['**Temas relacionados:**']);
+    const alreadyHasIntro = /\*\*.*(interesar|explorar|temas|sirve|ayudarte|referías|relacionad|consultarse)\*\*/i.test(text);
+    const finalText = alreadyHasIntro ? text : `${text}\n\n${intro}`;
+
+    return { text: finalText, topicSuggestions: suggestions };
+  },
+
+  /** Enriquece cualquier respuesta del bot con sugerencias de acompañamiento */
+  finalizeResponse(response, ctx = {}) {
+    if (!response?.text || response.skipCompanion || response.topicsMenu) return response;
+    const mode = response.companionMode || ctx.companionMode
+      || (response.partial || ctx.noAnswer ? 'no_answer' : 'companion');
+    const attached = this.attachCompanionSuggestions({
+      text: response.text,
+      query: ctx.query || ctx.userText || '',
+      match: ctx.match,
+      conv: ctx.conv,
+      existing: response.topicSuggestions,
+      mode
+    });
+    return { ...response, text: attached.text, topicSuggestions: attached.topicSuggestions };
   },
 
   /** Limpia cuerpo de respuesta duplicado o ruidoso */
@@ -6624,19 +6786,11 @@ const ResponseEngine = {
 
     if (!body) return null;
 
-    const confident = match.score >= 0.42;
-    const medium = match.score >= 0.28;
+    const T = this.THRESHOLDS;
+    const confident = match.score >= T.CONFIDENT;
+    const acceptable = match.score >= T.ANSWER;
 
-    if (!confident && medium) {
-      const related = this.findRelatedTopics(query, match.title, 4);
-      if (related.length && match.score < 0.36) {
-        body += '\n\n**¿Te referías a alguno de estos temas?**';
-        return {
-          body,
-          topicSuggestions: related.slice(0, 4)
-        };
-      }
-    }
+    if (!acceptable) return null;
 
     if (confident) {
       const lead = this.contextualLead(query, body);
@@ -6644,21 +6798,15 @@ const ResponseEngine = {
       return (lead ? lead + '\n\n' : '') + body + '\n\n' + closing;
     }
 
-    if (medium) {
-      return ARTURITO_PERSONALITY.pick(ARTURITO_PERSONALITY.lowConfidence) + '\n\n' + body +
-        '\n\n' + ARTURITO_PERSONALITY.pick(ARTURITO_PERSONALITY.closings);
-    }
-
-    return null;
+    return 'Según la base de conocimiento del edificio:\n\n' + body +
+      '\n\n' + ARTURITO_PERSONALITY.pick(ARTURITO_PERSONALITY.closings);
   },
 
-  /** Wrapper de compose — normaliza texto + sugerencias clicables */
+  /** Wrapper de compose — el acompañamiento se agrega en finalizeResponse */
   composeWithSuggestions(query, match, intent) {
     const result = this.compose(query, match, intent);
-    if (result && typeof result === 'object' && result.body) {
-      return { text: result.body, topicSuggestions: result.topicSuggestions || null };
-    }
-    return { text: result, topicSuggestions: null };
+    const text = result && typeof result === 'object' && result.body ? result.body : result;
+    return { text, topicSuggestions: null };
   },
 
   /** Intro contextual breve según tema de la pregunta */
@@ -6696,60 +6844,87 @@ const ResponseEngine = {
       { label: 'Crear solicitud', icon: 'ticket', fn: 'TicketModule.openCreateFromChat()' },
       { label: 'Hablar con humano', icon: 'user', fn: 'ChatModule.escalateFromChat()' }
     ];
+    const ctxBase = { userText, conv, intent };
 
     if (intent === 'escalate') {
-      return { text: getChatMsg('escalate'), expression: 'happy', actions: ticketActions, analytics: this.buildAnalytics('escalate', null, true) };
+      return this.finalizeResponse({
+        text: getChatMsg('escalate'), expression: 'happy', actions: ticketActions,
+        analytics: this.buildAnalytics('escalate', null, true)
+      }, { ...ctxBase, query: userText });
     }
     if (intent === 'ticket_create') {
-      return { text: getChatMsg('ticketPrompt'), expression: 'happy', actions: [{ label: 'Crear solicitud', icon: 'ticket', fn: 'TicketModule.openCreateFromChat()' }], analytics: this.buildAnalytics('ticket_create', null, true) };
+      return this.finalizeResponse({
+        text: getChatMsg('ticketPrompt'), expression: 'happy',
+        actions: [{ label: 'Crear solicitud', icon: 'ticket', fn: 'TicketModule.openCreateFromChat()' }],
+        analytics: this.buildAnalytics('ticket_create', null, true)
+      }, { ...ctxBase, query: userText });
     }
     if (intent === 'ticket_status') {
       const deptoMatch = userText.match(/\d{3,4}/);
       const tickets = database.tickets.filter(t => !deptoMatch || t.departamento.includes(deptoMatch[0]));
       if (tickets.length) {
         const list = tickets.slice(0, 5).map(t => `• ${t.id} — ${t.categoria} — ${t.estado}`).join('\n');
-        return { text: 'Estas son las solicitudes que encontré:\n\n' + list + '\n\n' + ARTURITO_PERSONALITY.pick(ARTURITO_PERSONALITY.closings), expression: 'happy', analytics: this.buildAnalytics('ticket_status', null, true) };
+        return this.finalizeResponse({
+          text: 'Estas son las solicitudes que encontré:\n\n' + list + '\n\n' + ARTURITO_PERSONALITY.pick(ARTURITO_PERSONALITY.closings),
+          expression: 'happy', analytics: this.buildAnalytics('ticket_status', null, true)
+        }, { ...ctxBase, query: userText });
       }
-      return { text: getChatMsg('noTickets'), expression: 'happy', actions: [{ label: 'Crear solicitud', icon: 'ticket', fn: 'TicketModule.openCreateFromChat()' }], analytics: this.buildAnalytics('ticket_status', null, true) };
+      return this.finalizeResponse({
+        text: getChatMsg('noTickets'), expression: 'happy',
+        actions: [{ label: 'Crear solicitud', icon: 'ticket', fn: 'TicketModule.openCreateFromChat()' }],
+        analytics: this.buildAnalytics('ticket_status', null, true)
+      }, { ...ctxBase, query: userText });
     }
     if (intent === 'greeting') {
       const botMsgs = (conv?.messages || []).filter(m => m.type === 'bot').length;
       if (botMsgs > 0) {
-        return { text: '¡Hola de nuevo! Cuéntame, ¿qué necesitas saber del edificio?', expression: 'happy', analytics: this.buildAnalytics('greeting', null, false) };
+        return this.finalizeResponse({
+          text: '¡Hola de nuevo! Cuéntame, ¿qué necesitas saber del edificio?',
+          expression: 'happy', analytics: this.buildAnalytics('greeting', null, false)
+        }, { ...ctxBase, query: 'consultas edificio' });
       }
-      return { text: database.settings.welcomeMessage?.trim() || ARTURITO_PERSONALITY.getGreeting(), expression: 'happy', analytics: this.buildAnalytics('greeting', null, false) };
+      return {
+        text: database.settings.welcomeMessage?.trim() || ARTURITO_PERSONALITY.getGreeting(),
+        expression: 'happy',
+        skipCompanion: true,
+        analytics: this.buildAnalytics('greeting', null, false)
+      };
     }
     if (['thanks', 'goodbye', 'affirmative'].includes(intent)) {
-      return { text: this.compose(userText, null, intent), expression: 'happy', analytics: this.buildAnalytics(intent, null, false) };
+      return this.finalizeResponse({
+        text: this.compose(userText, null, intent),
+        expression: 'happy',
+        analytics: this.buildAnalytics(intent, null, false)
+      }, { ...ctxBase, query: userText || 'temas edificio' });
     }
 
     const query = this.buildContextualQuery(userText, conv);
     const match = this.retrieve(query);
-    const { text, topicSuggestions } = this.composeWithSuggestions(query, match, intent);
-    const confidence = typeof ArturitoCloud !== 'undefined' && ArturitoCloud.chatbot
-      ? ArturitoCloud.chatbot.computeConfidence(match)
-      : (match ? Math.min(100, Math.round((match.score || 0) / 0.45 * 100)) : 0);
+    const { text } = this.composeWithSuggestions(query, match, intent);
+    const T = this.THRESHOLDS;
+    const confidence = match
+      ? Math.min(100, Math.round((match.score / T.CONFIDENT) * 100))
+      : 0;
 
     if (text) {
-      const expression = match && match.score >= 0.42 ? 'happy' : (match && match.score >= 0.28 ? 'think' : 'confused');
-      const escalate = confidence < 70;
+      const expression = match && match.score >= T.CONFIDENT ? 'happy' : 'think';
+      const escalate = match.score < T.CONFIDENT;
       const actions = escalate ? ticketActions : undefined;
-      return {
+      return this.finalizeResponse({
         text,
-        topicSuggestions: topicSuggestions || null,
         expression,
         confidence,
         escalate,
         actions,
-        partial: match && match.score < 0.28,
+        partial: false,
         analytics: this.buildAnalytics(intent, match, true)
-      };
+      }, { ...ctxBase, query, match });
     }
 
     const customFallback = database.settings?.chatMessages?.fallback?.trim();
     const fallbackText = customFallback || ARTURITO_PERSONALITY.getFallback();
     const noAnswer = this.buildNoAnswerResponse(query, fallbackText, match?.title || '');
-    return {
+    return this.finalizeResponse({
       text: noAnswer.text,
       topicSuggestions: noAnswer.topicSuggestions,
       expression: 'confused',
@@ -6757,8 +6932,9 @@ const ResponseEngine = {
       partial: true,
       confidence: 0,
       escalate: true,
+      companionMode: 'no_answer',
       analytics: this.buildAnalytics('fallback', null, true)
-    };
+    }, { ...ctxBase, query, match, noAnswer: true });
   }
 };
 
@@ -7166,17 +7342,32 @@ const ChatModule = {
   },
   /** Responde al seleccionar un tema del menú o sugerencia relacionada */
   onTopicSelected(entryId, question) {
+    const conv = this.getCurrent();
+    const deliver = (replyText, meta) => {
+      const finalized = ResponseEngine.finalizeResponse(
+        { text: replyText, confidence: meta.confidence, skipCompanion: false },
+        { userText: meta.userQuery, query: meta.userQuery, match: { title: meta.topicTitle }, intent: 'topic_select', conv }
+      );
+      this.addBotMessage(finalized.text, undefined, {
+        userQuery: meta.userQuery,
+        source: meta.source,
+        topicTitle: meta.topicTitle,
+        intent: 'topic_select',
+        confidence: meta.confidence,
+        topicSuggestions: finalized.topicSuggestions
+      });
+    };
+
     const entry = GadgetKBModule.getById(entryId);
     if (entry) {
       ArturitoModule.onAnswerFound();
       this.showTyping(true);
       setTimeout(() => {
         this.showTyping(false);
-        this.addBotMessage(GadgetKBModule.formatResponse(entry.response, question || entry.title), undefined, {
+        deliver(GadgetKBModule.formatResponse(entry.response, question || entry.title), {
           userQuery: question || entry.title || entry.question,
           source: 'gadget',
           topicTitle: entry.title,
-          intent: 'topic_select',
           confidence: 92
         });
       }, 650 + Math.random() * 500);
@@ -7191,11 +7382,10 @@ const ChatModule = {
       this.showTyping(true);
       setTimeout(() => {
         this.showTyping(false);
-        this.addBotMessage(GadgetKBModule.formatResponse(kEntry.respuesta, q), undefined, {
+        deliver(GadgetKBModule.formatResponse(kEntry.respuesta, q), {
           userQuery: q,
           source: kEntry.origin === 'gadget' ? 'gadget' : 'manual',
           topicTitle: kEntry.pregunta,
-          intent: 'topic_select',
           confidence: 90
         });
       }, 650 + Math.random() * 500);
@@ -7230,7 +7420,7 @@ const ChatModule = {
     const conv = this.getCurrent();
     const result = ResponseEngine.respond(text, conv);
 
-    if (result.expression === 'confused' || result.partial) {
+    if (result.expression === 'confused' || (result.partial && !result.topicSuggestions?.length)) {
       if (result.partial) ArturitoModule.setExpression('confused');
       else ArturitoModule.onNotFound();
     } else if (result.expression === 'think') {
@@ -7241,7 +7431,7 @@ const ChatModule = {
     }
 
     let replyText = result.text;
-    if (result.escalate && result.confidence < 70) {
+    if (result.escalate && result.confidence < 80 && !(result.topicSuggestions?.length >= 2)) {
       replyText += '\n\nNo estoy 100% seguro de esta respuesta. ¿Quieres que cree una solicitud para que el equipo te contacte?';
       if (ArturitoCloud?.fb?.isEnabled()) {
         ArturitoCloud.notifications.push({
