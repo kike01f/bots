@@ -3004,6 +3004,63 @@ const ARTURITO_GADGET_KB_SEED = [
       this._cloudSettingsActive = false;
       this._pushing = false;
       this._syncing = false;
+      this._recentPushIds = new Map();
+      this._recentDeleteIds = new Map();
+    }
+
+    _pruneRecentMaps() {
+      const cutoff = Date.now() - 60000;
+      [this._recentPushIds, this._recentDeleteIds].forEach((map) => {
+        map.forEach((ts, id) => { if (ts < cutoff) map.delete(id); });
+      });
+    }
+
+    _markPushed(ids) {
+      if (!ids?.length) return;
+      const now = Date.now();
+      ids.filter(Boolean).forEach((id) => this._recentPushIds.set(id, now));
+    }
+
+    _markDeleted(ids) {
+      if (!ids?.length) return;
+      const now = Date.now();
+      ids.filter(Boolean).forEach((id) => {
+        this._recentDeleteIds.set(id, now);
+        this._recentPushIds.delete(id);
+      });
+    }
+
+    /** Nube manda; solo conserva en memoria escrituras pendientes de confirmación (_recentPushIds) */
+    mergeGadgetKB(inMemoryArr, remoteArr) {
+      this._pruneRecentMaps();
+      const merged = new Map();
+      (remoteArr || []).forEach((item) => {
+        if (this._recentDeleteIds.has(item.id)) return;
+        merged.set(item.id, item);
+      });
+      (inMemoryArr || []).forEach((item) => {
+        if (this._recentPushIds.has(item.id) && !merged.has(item.id)) {
+          merged.set(item.id, item);
+        }
+      });
+      this._recentDeleteIds.forEach((_ts, id) => merged.delete(id));
+      return [...merged.values()].sort((a, b) => (a.order || 0) - (b.order || 0));
+    }
+
+    mergeManualKnowledge(inMemoryArr, remoteArr) {
+      this._pruneRecentMaps();
+      const merged = new Map();
+      (remoteArr || []).forEach((item) => {
+        if (this._recentDeleteIds.has(item.id)) return;
+        merged.set(item.id, item);
+      });
+      (inMemoryArr || []).forEach((item) => {
+        if (this._recentPushIds.has(item.id) && !merged.has(item.id)) {
+          merged.set(item.id, item);
+        }
+      });
+      this._recentDeleteIds.forEach((_ts, id) => merged.delete(id));
+      return [...merged.values()];
     }
 
     _cid() {
@@ -3293,10 +3350,12 @@ const ARTURITO_GADGET_KB_SEED = [
         const remoteGadget = gadgetSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
           .sort((a, b) => (a.order || 0) - (b.order || 0));
         const remoteManual = manualSnap.docs.map((d) => this.mapManualFromCloud(d.id, d.data()));
-        if (JSON.stringify(remoteGadget) !== JSON.stringify(database.gadgetKB || [])) changes.gadgetKB = true;
-        if (JSON.stringify(remoteManual) !== JSON.stringify(database.manualKnowledge || [])) changes.knowledge = true;
-        database.gadgetKB = remoteGadget;
-        database.manualKnowledge = remoteManual;
+        const mergedGadget = this.mergeGadgetKB(database.gadgetKB || [], remoteGadget);
+        const mergedManual = this.mergeManualKnowledge(database.manualKnowledge || [], remoteManual);
+        if (JSON.stringify(mergedGadget) !== JSON.stringify(database.gadgetKB || [])) changes.gadgetKB = true;
+        if (JSON.stringify(mergedManual) !== JSON.stringify(database.manualKnowledge || [])) changes.knowledge = true;
+        database.gadgetKB = mergedGadget;
+        database.manualKnowledge = mergedManual;
         if (settingsSnap?.exists() || remoteGadget.length || remoteManual.length) {
           this._cloudKBActive = true;
         }
@@ -3351,23 +3410,7 @@ const ARTURITO_GADGET_KB_SEED = [
 
     queuePendingSettings() { /* sync público — ya no requiere cola por auth */ }
 
-    async flushPendingSettings(database) {
-      if (!this.fb.isEnabled()) return false;
-      const raw = localStorage.getItem(PENDING_SETTINGS_KEY);
-      if (!raw) return false;
-      try {
-        localStorage.removeItem(PENDING_SETTINGS_KEY);
-        const pending = JSON.parse(raw);
-        database.settings = this.applyRemoteSettings(database.settings, pending);
-        database.settings.updatedAt = Date.now();
-        await this.syncSettings(database.settings);
-        this._cacheLocal(database);
-        return true;
-      } catch (err) {
-        console.warn('[CloudSync] flushPendingSettings:', err);
-        return false;
-      }
-    }
+    async flushPendingSettings() { return false; }
 
     /**
      * Sube temas Gadget a Firestore.
@@ -3381,6 +3424,7 @@ const ARTURITO_GADGET_KB_SEED = [
       const list = entries || [];
       if (options.deletedIds?.length) {
         await this.deleteCollectionDocs('gadget_kb', options.deletedIds);
+        this._markDeleted(options.deletedIds);
       }
       if (options.fullSync) {
         await this.syncCollectionReplace(
@@ -3389,6 +3433,7 @@ const ARTURITO_GADGET_KB_SEED = [
           (e) => ({ ...e, updatedAt: Date.now() }),
           (e) => e.id || e.key
         );
+        this._markPushed(list.map((e) => e.id || e.key));
         this._cloudKBActive = true;
         return;
       }
@@ -3402,6 +3447,7 @@ const ARTURITO_GADGET_KB_SEED = [
           (e) => ({ ...e, updatedAt: Date.now() }),
           (e) => e.id || e.key
         );
+        this._markPushed(toWrite.map((e) => e.id || e.key));
       }
       this._cloudKBActive = true;
     }
@@ -3411,6 +3457,7 @@ const ARTURITO_GADGET_KB_SEED = [
       const manual = (knowledgeArr || []).filter((k) => k.origin !== 'gadget');
       if (options.deletedIds?.length) {
         await this.deleteCollectionDocs('knowledge_base', options.deletedIds);
+        this._markDeleted(options.deletedIds);
       }
       if (options.fullSync) {
         await this.syncCollectionReplace(
@@ -3419,6 +3466,7 @@ const ARTURITO_GADGET_KB_SEED = [
           (k) => this.mapManualToCloud(k),
           (k) => k.id
         );
+        this._markPushed(manual.map((k) => k.id));
         this._cloudKBActive = true;
         return;
       }
@@ -3432,6 +3480,7 @@ const ARTURITO_GADGET_KB_SEED = [
           (k) => this.mapManualToCloud(k),
           (k) => k.id
         );
+        this._markPushed(toWrite.map((k) => k.id));
       }
       this._cloudKBActive = true;
     }
@@ -3536,9 +3585,10 @@ const ARTURITO_GADGET_KB_SEED = [
             .sort((a, b) => (a.order || 0) - (b.order || 0));
           if (!remote.length && !this._cloudKBActive && (database.gadgetKB?.length || 0) > 0) return;
           this._cloudKBActive = true;
-          if (JSON.stringify(remote) === JSON.stringify(database.gadgetKB || [])) return;
+          const merged = this.mergeGadgetKB(database.gadgetKB || [], remote);
+          if (JSON.stringify(merged) === JSON.stringify(database.gadgetKB || [])) return;
           this._syncing = true;
-          database.gadgetKB = remote;
+          database.gadgetKB = merged;
           this.applyUnifiedKnowledge(database);
           this._cacheLocal(database);
           this._syncing = false;
@@ -3555,9 +3605,10 @@ const ARTURITO_GADGET_KB_SEED = [
           const remote = snap.docs.map((d) => this.mapManualFromCloud(d.id, d.data()));
           if (!remote.length && !this._cloudKBActive && (database.manualKnowledge?.length || 0) > 0) return;
           this._cloudKBActive = true;
-          if (JSON.stringify(remote) === JSON.stringify(database.manualKnowledge || [])) return;
+          const merged = this.mergeManualKnowledge(database.manualKnowledge || [], remote);
+          if (JSON.stringify(merged) === JSON.stringify(database.manualKnowledge || [])) return;
           this._syncing = true;
-          database.manualKnowledge = remote;
+          database.manualKnowledge = merged;
           this.applyUnifiedKnowledge(database);
           this._cacheLocal(database);
           this._syncing = false;
@@ -3588,11 +3639,7 @@ const ARTURITO_GADGET_KB_SEED = [
       this.bindTicketsWatch(database, onUpdate);
     }
 
-    _cacheLocal(database) {
-      try {
-        localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
-      } catch (_) {}
-    }
+    _cacheLocal(_database) { /* cloud-only: sin persistencia local */ }
 
     stop() {
       this.stopTicketsWatch();
@@ -3603,7 +3650,7 @@ const ARTURITO_GADGET_KB_SEED = [
     }
   }
 
-  /* ─── UnifiedDataStore — único punto de persistencia local + nube ─── */
+  /* ─── UnifiedDataStore — persistencia exclusiva en Firestore (memoria solo en sesión) ─── */
   class UnifiedDataStore {
     constructor(fb, sync) {
       this.fb = fb;
@@ -3614,42 +3661,28 @@ const ARTURITO_GADGET_KB_SEED = [
       return this.fb.isEnabled();
     }
 
-    _enqueuePending(scope, options) {
-      try {
-        const queue = JSON.parse(localStorage.getItem(PENDING_CLOUD_SYNC_KEY) || '[]');
-        queue.push({ scope, options: options || {}, ts: Date.now() });
-        localStorage.setItem(PENDING_CLOUD_SYNC_KEY, JSON.stringify(queue.slice(-30)));
-      } catch (_) {}
-    }
-
-    async flushPendingCloud(database) {
-      if (!this.fb.isEnabled()) return;
-      let queue = [];
-      try { queue = JSON.parse(localStorage.getItem(PENDING_CLOUD_SYNC_KEY) || '[]'); } catch (_) {}
-      if (!queue.length) return;
-      localStorage.removeItem(PENDING_CLOUD_SYNC_KEY);
-      for (const item of queue) {
-        try {
-          await this.persist(database, item.scope || 'full', item.options || {});
-        } catch (err) {
-          console.warn('[DataStore] flushPendingCloud:', err);
-        }
+    async _waitForSyncLock() {
+      for (let i = 0; i < 24 && (this.sync._syncing || this.sync._pushing); i++) {
+        await new Promise((r) => setTimeout(r, 50));
       }
     }
 
-    /** Guarda siempre en localStorage y replica a Firestore según scope (escrituras en paralelo) */
+    /** Cloud-only: sin cola ni caché local */
+    async flushPendingCloud() {}
+
+    /** Persiste en Firestore según scope; scope 'local' = solo memoria de sesión (chat, UI) */
     async persist(database, scope = 'local', options = {}) {
       if (!database.manualKnowledge) {
         database.manualKnowledge = (database.knowledge || []).filter((k) => k.origin !== 'gadget');
       }
-      localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
       if (scope === 'local') {
-        return { local: true, cloud: false };
+        return { cloud: false, memory: true };
       }
-      if (!this.fb.isEnabled() || this.sync._syncing) {
-        this._enqueuePending(scope, options);
-        return { local: true, cloud: false, reason: this.fb.isEnabled() ? 'syncing' : 'offline' };
+      if (!this.fb.isEnabled()) {
+        global.toast?.('Sin conexión a Firebase. El cambio no se guardó.', 'error');
+        return { cloud: false, reason: 'offline' };
       }
+      await this._waitForSyncLock();
 
       this.sync._pushing = true;
       let cloudOk = true;
@@ -3671,7 +3704,6 @@ const ARTURITO_GADGET_KB_SEED = [
             await this.sync.ensureCondominioDoc(database.settings?.buildingName);
             const synced = await this.sync.syncSettings(database.settings);
             if (synced?.updatedAt) database.settings.updatedAt = synced.updatedAt;
-            localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
           } catch (err) {
             cloudOk = false;
             lastErr = err;
@@ -3714,7 +3746,6 @@ const ARTURITO_GADGET_KB_SEED = [
             database.settings.updatedAt = Date.now();
             await this.sync.ensureCondominioDoc(database.settings?.buildingName);
             await this.sync.syncSettings(database.settings);
-            localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
           } catch (err) {
             cloudOk = false;
             lastErr = err;
@@ -3725,19 +3756,19 @@ const ARTURITO_GADGET_KB_SEED = [
 
       try {
         await Promise.all(ops);
-        if (cloudOk) this.sync._cacheLocal(database);
         if (!cloudOk && lastErr) {
-          this._enqueuePending(scope, options);
           const msg = lastErr.message || String(lastErr);
-          const hint = msg.includes('permission') || msg.includes('PERMISSION_DENIED')
-            ? 'Publica las reglas de firestore.rules en Firebase Console (proyecto chatbots-hipodromo).'
-            : msg;
-          global.toast?.('No se guardó en la nube. Publica firestore.rules o revisa tu conexión.', 'error');
+          global.toast?.(
+            msg.includes('permission') || msg.includes('PERMISSION_DENIED')
+              ? 'Sin permiso en Firestore. Publica firestore.rules en Firebase Console (proyecto chatbots-hipodromo).'
+              : 'No se guardó en la nube. Revisa tu conexión e intenta de nuevo.',
+            'error'
+          );
         }
       } finally {
         this.sync._pushing = false;
       }
-      return { local: true, cloud: cloudOk };
+      return { cloud: cloudOk };
     }
 
     /** Al conectar: la nube manda siempre; sube semilla solo si Firestore está vacío */
@@ -3767,13 +3798,10 @@ const ARTURITO_GADGET_KB_SEED = [
       }
 
       this.sync.applyUnifiedKnowledge(database);
-      this._cacheLocal(database);
 
       this.sync.startRealtimeSync(database, (type) => {
         if (callbacks.onSync) callbacks.onSync(type);
       });
-
-      await this.flushPendingCloud(database);
 
       return { mode: 'cloud', migrated };
     }
@@ -4107,12 +4135,23 @@ let sortState = { field: 'createdAt', dir: -1 };
 
 /* ─── DatabaseModule ─── */
 const DatabaseModule = {
-  /** Inicializa estructura mínima; NO carga caché local como fuente de verdad */
+  /** Inicializa estructura en memoria; la nube (Firestore) es la única fuente de verdad */
   init() {
     this.seed();
     this.ensureDefaults({ skipGadgetSeed: true });
+    this.clearLegacyLocalStorage();
     const purged = this.purgePilotData();
     return { purged, repaired: false };
+  },
+  /** Elimina cachés locales obsoletos — la app no persiste datos fuera de Firestore */
+  clearLegacyLocalStorage() {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+      Object.keys(localStorage).filter((k) => k.startsWith(BACKUP_PREFIX)).forEach((k) => localStorage.removeItem(k));
+      if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.LOCAL_DB_KEY) {
+        localStorage.removeItem(ArturitoCloud.LOCAL_DB_KEY);
+      }
+    } catch (_) {}
   },
   /** Semilla Gadget solo para primera migración a nube vacía */
   seedGadgetTemplate() {
@@ -4239,21 +4278,16 @@ const DatabaseModule = {
     }
     if (typeof KnowledgeBaseModule !== 'undefined') KnowledgeBaseModule.syncFromGadget();
   },
-  /** Persiste local + nube (UnifiedDataStore). scope: local | settings | gadgetKB | knowledge | analytics | full */
+  /** Persiste en Firestore (UnifiedDataStore). scope: local = solo sesión | settings | gadgetKB | knowledge | analytics | full */
   async save(scope = 'local', options = {}) {
     if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.store) {
-      const result = await ArturitoCloud.store.persist(database, scope, options);
-      if (!result?.cloud && scope !== 'local') {
-        if (result?.reason === 'offline') {
-          toast('Sin conexión: el cambio quedó en cola y se subirá al reconectar.', 'warning');
-        } else if (typeof App !== 'undefined' && App.mode === 'admin') {
-          toast('No se guardó en la nube. Revisa Firebase y tu conexión.', 'error');
-        }
-      }
-      return result;
+      return ArturitoCloud.store.persist(database, scope, options);
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(database));
-    return { local: true, cloud: false };
+    if (scope !== 'local') {
+      toast('Firebase no disponible. El cambio no se guardó.', 'error');
+      return { cloud: false, reason: 'offline' };
+    }
+    return { cloud: false, memory: true };
   },
   /** Genera ID único */
   uid(prefix = 'id') { return prefix + '_' + Date.now() + '_' + Math.random().toString(36).substr(2,5); },
@@ -4266,13 +4300,8 @@ const DatabaseModule = {
     const num = String(today.length + 1).padStart(4,'0');
     return prefix + num;
   },
-  /** Backup automático — guarda los últimos 5 respaldos */
-  autoBackup() {
-    const key = BACKUP_PREFIX + Date.now();
-    localStorage.setItem(key, JSON.stringify(database));
-    const keys = Object.keys(localStorage).filter(k => k.startsWith(BACKUP_PREFIX)).sort();
-    while (keys.length > 5) { localStorage.removeItem(keys.shift()); }
-  },
+  /** Cloud-only: sin respaldos locales automáticos */
+  autoBackup() {},
   /** Exporta base completa como JSON */
   exportJSON() {
     const blob = new Blob([JSON.stringify(database, null, 2)], { type: 'application/json' });
@@ -4291,12 +4320,10 @@ const DatabaseModule = {
     }
     return false;
   },
-  /** Restaura el backup más reciente */
+  /** Cloud-only: restauración solo desde exportación JSON manual */
   restoreLatest() {
-    const keys = Object.keys(localStorage).filter(k => k.startsWith(BACKUP_PREFIX)).sort();
-    if (!keys.length) return false;
-    database = JSON.parse(localStorage.getItem(keys[keys.length-1]));
-    this.ensureDefaults(); this.save('full', { fullSync: true }); return true;
+    toast('No hay respaldos locales. Usa exportar/importar JSON o recupera desde Firestore.', 'info');
+    return false;
   }
 };
 window.DatabaseModule = DatabaseModule;
@@ -4820,20 +4847,28 @@ const RAGModule = {
   DIM: 128,
   STOP: new Set('de del la las los el en y a o que es un una por con para al se su sus este esta como mas pero si no hay son ser estar tiene pueden debe reglamento edificio'.split(' ')),
   SYNONYMS: {
-    horario:['horarios','atencion','conserjeria','conserje','hora','apertura','cierre'],
-    pago:['pagar','pagos','transferencia','deposito','comprobante','boleta'],
-    gastos:['comunes','gc','expensas','administracion','cobro'],
-    reserva:['reservar','reservacion','agendar','booking','quincho','sala','piscina'],
-    emergencia:['urgencia','urgente','bomberos','ambulancia','incendio','sismo'],
-    mascota:['mascotas','perro','perros','gato','gatos','animal','animales'],
-    mudanza:['mudanzas','traslado','flete','camion'],
-    ruido:['ruidos','molestia','molestias','fiesta','fiestas','decibel'],
-    ascensor:['ascensores','elevador','elevadores'],
-    estacionamiento:['estacionamientos','cochera','cocheras','parking','garage','vehiculo'],
-    reclamo:['reclamos','queja','quejas','denuncia'],
-    mantencion:['mantenimiento','reparacion','reparaciones','averia','filtracion','goteo'],
-    seguridad:['vigilancia','acceso','accesos','porton','tarjeta','tag'],
-    basura:['basuras','reciclaje','reciclables','escombros']
+    horario:['horarios','atencion','atención','conserjeria','conserjería','conserje','hora','apertura','cierre','recepcion','recepción'],
+    pago:['pagar','pagos','transferencia','deposito','depósito','comprobante','boleta','abonar','cancelar'],
+    gastos:['comunes','gc','ggcc','expensas','administracion','administración','cobro','arriendo','mantencion edificio'],
+    reserva:['reservar','reservacion','reservación','agendar','booking','quincho','sala','piscina','gimnasio','sum','espacios'],
+    emergencia:['urgencia','urgente','bomberos','ambulancia','incendio','sismo','131','132','133'],
+    mascota:['mascotas','perro','perros','gato','gatos','animal','animales','mascota permitida'],
+    mudanza:['mudanzas','traslado','flete','camion','camión','mover','mudarse'],
+    ruido:['ruidos','molestia','molestias','fiesta','fiestas','decibel','musica','música','vecino'],
+    ascensor:['ascensores','elevador','elevadores','lift'],
+    estacionamiento:['estacionamientos','cochera','cocheras','parking','garage','garaje','vehiculo','vehículo','auto'],
+    reclamo:['reclamos','queja','quejas','denuncia','reclamar'],
+    mantencion:['mantenimiento','reparacion','reparación','averia','avería','filtracion','filtración','goteo','arreglo'],
+    seguridad:['vigilancia','acceso','accesos','porton','portón','tarjeta','tag','llave','control acceso'],
+    basura:['basuras','reciclaje','reciclables','escombros','basurero','retiro'],
+    visita:['visitas','visitante','visitantes','invitado','invitados','invitada','ingreso'],
+    conserje:['conserjeria','conserjería','porteria','portería','recepcion','recepción','guardia'],
+    correspondencia:['encomienda','encomiendas','paquete','paquetes','delivery','correo','cartas'],
+    reglamento:['normas','normativa','reglamentos','protocolo','politicas','políticas','prohibido','permitido'],
+    areas:['areas comunes','áreas comunes','espacios comunes','salon','salón','terraza','bbq'],
+    lavanderia:['lavandería','lavado','secadora','lavanderia'],
+    bodega:['bodegas','storage','depósito','deposito'],
+    corte:['corte de agua','corte de luz','agua potable','luz','servicios basicos','servicios básicos']
   },
   CAT_KEYWORDS: {
     'Conserjería':['conserje','conserjeria','horario','recepcion','visitas','encomienda','paquete'],
@@ -5062,16 +5097,36 @@ const RAGModule = {
     };
   },
 
-  /** Expande consulta con sinónimos */
+  /** Expande consulta con sinónimos (RAG + Gadget) */
   expandQueryTokens(query) {
     const tokens = this.tokenize(query);
     const expanded = new Set(tokens);
-    tokens.forEach(t => {
-      Object.entries(this.SYNONYMS).forEach(([key, syns]) => {
-        if (t.includes(key) || key.includes(t)) syns.forEach(s => expanded.add(s));
-        syns.forEach(s => { if (t.includes(s) || s.includes(t)) { expanded.add(key); syns.forEach(x => expanded.add(x)); } });
+    const applySynonyms = (SYNONYMS) => {
+      tokens.forEach(t => {
+        Object.entries(SYNONYMS).forEach(([key, syns]) => {
+          if (t.includes(key) || key.includes(t)) {
+            expanded.add(key);
+            syns.forEach(s => {
+              expanded.add(s);
+              s.split(/\s+/).filter(w => w.length > 2).forEach(w => expanded.add(w));
+            });
+          }
+          syns.forEach(s => {
+            if (t.includes(s) || s.includes(t)) {
+              expanded.add(key);
+              syns.forEach(x => {
+                expanded.add(x);
+                x.split(/\s+/).filter(w => w.length > 2).forEach(w => expanded.add(w));
+              });
+            }
+          });
+        });
       });
-    });
+    };
+    applySynonyms(this.SYNONYMS);
+    if (typeof GadgetKBModule !== 'undefined' && GadgetKBModule.SYNONYMS) {
+      applySynonyms(GadgetKBModule.SYNONYMS);
+    }
     return [...expanded];
   },
 
@@ -5158,15 +5213,21 @@ const RAGModule = {
     return this.index.length;
   },
 
-  /** Búsqueda inteligente multi-señal */
+  /** Búsqueda inteligente multi-señal con interpretación de preguntas naturales */
   search(query, topK = 5) {
     if (!this.index.length) return [];
-    const qTokens = this.expandQueryTokens(query);
+    const normalizedQuery = typeof QueryUnderstandingModule !== 'undefined'
+      ? QueryUnderstandingModule.stripFillers(query)
+      : query;
+    const qTokens = this.expandQueryTokens(normalizedQuery || query);
+    const qCore = typeof QueryUnderstandingModule !== 'undefined'
+      ? QueryUnderstandingModule.coreTokens(query)
+      : qTokens;
     const qEmbed = this.hashEmbed(qTokens);
     const qTf = {};
     qTokens.forEach(t => { qTf[t] = (qTf[t] || 0) + 1; });
     Object.keys(qTf).forEach(t => { qTf[t] /= qTokens.length; });
-    const qLower = query.toLowerCase();
+    const qLower = (normalizedQuery || query).toLowerCase();
 
     const results = this.index.map(item => {
       let tfidfScore = 0;
@@ -5181,9 +5242,25 @@ const RAGModule = {
         if (titleTokens.some(t => t === q || t.startsWith(q) || q.startsWith(t))) titleScore += 0.12;
       });
       if (item.source === 'manual' && item.title.toLowerCase().includes(qLower.substring(0, Math.min(12, qLower.length)))) titleScore += 0.35;
-      const score = tfidfScore * 0.42 + embedScore * 0.32 + kwScore + titleScore;
-      return { ...item, score, tfidfScore, embedScore };
-    }).filter(r => r.score > 0.025).sort((a,b) => b.score - a.score).slice(0, topK);
+
+      let coreOverlap = 0;
+      if (typeof QueryUnderstandingModule !== 'undefined' && qCore.length) {
+        coreOverlap = QueryUnderstandingModule.tokenOverlapScore(qCore, item.title + ' ' + item.content);
+      }
+
+      let questionBoost = 0;
+      (item.suggestedQuestions || []).forEach((sq) => {
+        if (typeof QueryUnderstandingModule !== 'undefined' && qCore.length) {
+          const sqScore = QueryUnderstandingModule.tokenOverlapScore(qCore, sq);
+          if (sqScore > 0.45) questionBoost = Math.max(questionBoost, sqScore * 0.4);
+        } else if (String(sq).toLowerCase().includes(qLower.substring(0, 8))) {
+          questionBoost = Math.max(questionBoost, 0.25);
+        }
+      });
+
+      const score = tfidfScore * 0.36 + embedScore * 0.28 + kwScore + titleScore + coreOverlap * 0.32 + questionBoost;
+      return { ...item, score, tfidfScore, embedScore, coreOverlap };
+    }).filter(r => r.score > 0.02).sort((a,b) => b.score - a.score).slice(0, topK);
 
     return results;
   },
@@ -5439,8 +5516,8 @@ const GadgetKBModule = {
     return n;
   },
 
-  calculateMatchScore(text, keywords) {
-    const normalizedText = this.normalizeText(text);
+  calculateMatchScore(text, keywords, extraText = '') {
+    const normalizedText = this.normalizeText(text + ' ' + extraText);
     let score = 0, matches = 0;
     (keywords || []).forEach(keyword => {
       const nk = this.normalizeText(keyword);
@@ -5470,14 +5547,30 @@ const GadgetKBModule = {
     const entries = this.getEntries().filter(e => e.enabled !== false);
     let best = null, bestScore = 0;
     entries.forEach(entry => {
-      const { score } = this.calculateMatchScore(text, entry.keywords);
-      if (score > bestScore) { bestScore = score; best = entry; }
+      const { score } = this.calculateMatchScore(text, entry.keywords, entry.title + ' ' + (entry.question || ''));
+      const semantic = typeof QueryUnderstandingModule !== 'undefined'
+        ? QueryUnderstandingModule.scoreKnowledgeEntry(
+            { pregunta: entry.title, respuesta: entry.response, keywordList: entry.keywords, question: entry.question },
+            text
+          ).score
+        : 0;
+      const combined = Math.max(score / 10, semantic);
+      if (combined > bestScore) { bestScore = combined; best = entry; }
     });
-    if (best && bestScore >= 3) {
+    if (best && bestScore >= 0.28) {
       return { entry: best, score: bestScore, response: this.formatResponse(best.response, text), source: 'gadget' };
     }
-    const partial = entries.map(e => ({ entry: e, ...this.calculateMatchScore(text, e.keywords) }))
-      .filter(x => x.score > 0 && x.score < 3).sort((a, b) => b.score - a.score).slice(0, 3);
+    const partial = entries.map(e => {
+      const semantic = typeof QueryUnderstandingModule !== 'undefined'
+        ? QueryUnderstandingModule.scoreKnowledgeEntry(
+            { pregunta: e.title, respuesta: e.response, keywordList: e.keywords, question: e.question },
+            text
+          ).score
+        : 0;
+      const kw = this.calculateMatchScore(text, e.keywords, e.title + ' ' + (e.question || ''));
+      return { entry: e, score: Math.max(kw.score, semantic * 10) };
+    })
+      .filter(x => x.score > 0 && x.score < 2.8).sort((a, b) => b.score - a.score).slice(0, 3);
     if (partial.length) {
       const suggestions = partial.map(p => p.entry.title).join('\n• ');
       return {
@@ -5644,18 +5737,19 @@ const KnowledgeBaseModule = {
     return (database.knowledge || []).filter(k => k.enabled !== false);
   },
 
-  /** Puntúa entrada unificada (misma lógica que arturito-gadget) */
+  /** Puntúa entrada unificada con interpretación semántica multi-señal */
   scoreEntry(entry, query) {
+    if (typeof QueryUnderstandingModule !== 'undefined') {
+      return QueryUnderstandingModule.scoreKnowledgeEntry(entry, query);
+    }
     const keywords = this.getKeywords(entry);
     const { score, matches } = GadgetKBModule.calculateMatchScore(query, keywords);
     let normalized = Math.min(1, score / 10);
-
     const qNorm = GadgetKBModule.normalizeText(query);
     const titleNorm = GadgetKBModule.normalizeText(entry.pregunta || '');
     if (titleNorm.length > 3 && (qNorm.includes(titleNorm) || titleNorm.split(' ').some(w => w.length > 3 && qNorm.includes(w)))) {
       normalized = Math.max(normalized, 0.55);
     }
-
     if (matches === 0) {
       const qTokens = RAGModule.expandQueryTokens(query);
       const blob = GadgetKBModule.normalizeText(entry.pregunta + ' ' + entry.respuesta + ' ' + keywords.join(' '));
@@ -5663,12 +5757,20 @@ const KnowledgeBaseModule = {
       qTokens.forEach(t => { if (t.length > 2 && blob.includes(t)) hits++; });
       if (hits >= 2) normalized = Math.max(normalized, Math.min(1, hits / 5));
     }
-
     return { score: normalized, rawScore: score, matches };
   },
 
+  /** Devuelve candidatos ordenados por relevancia */
+  searchRanked(query, minScore = 0.15, limit = 5) {
+    return this.getEnabled()
+      .map((entry) => ({ entry, ...this.scoreEntry(entry, query) }))
+      .filter((x) => x.score >= minScore)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+  },
+
   /** Mejor coincidencia en base manual unificada */
-  search(query, minScore = 0.22) {
+  search(query, minScore = 0.18) {
     let best = null, bestScore = 0;
     this.getEnabled().forEach(entry => {
       const { score } = this.scoreEntry(entry, query);
@@ -6157,9 +6259,138 @@ const GadgetModule = {
   }
 };
 
+/* ─── QueryUnderstandingModule — Interpretación de preguntas naturales ─── */
+const QueryUnderstandingModule = {
+  FILLERS: /\b(hola|oye|buenas|por favor|me gustaria|me gustaría|quisiera|necesito saber|podrias|podrías|me puedes|me podrias|me podrías|cuentame|cuéntame|dime|acerca de|sobre el tema|sobre la|sobre lo|una consulta|consulta sobre|pregunta sobre|informacion sobre|información sobre|saber sobre|quiero saber|me interesa)\b/gi,
+  QUESTION_WORDS: new Set(['que','qué','como','cómo','cual','cuál','cuales','cuáles','donde','dónde','cuando','cuándo','cuanto','cuánto','cuanta','cuánta','porque','porqué','por','hay','hace','puedo','puede','se','es','son','esta','está','estan','están','tiene','tienen','debo','debe','dias','días','hora','horas','alguien','algo','algun','algún','alguna','ese','esa','eso','este','esta','estos','estas']),
+
+  normalize(text) {
+    return String(text || '').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\w\sñü]/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+  },
+
+  stripFillers(text) {
+    let t = this.normalize(text);
+    t = t.replace(this.FILLERS, ' ').replace(/\s+/g, ' ').trim();
+    return t;
+  },
+
+  coreTokens(text) {
+    const expanded = RAGModule.expandQueryTokens(this.stripFillers(text));
+    return expanded.filter((t) => t.length > 2 && !RAGModule.STOP.has(t) && !this.QUESTION_WORDS.has(t));
+  },
+
+  queryVariants(text) {
+    const raw = String(text || '').trim();
+    const stripped = this.stripFillers(raw);
+    const core = this.coreTokens(raw).join(' ');
+    return [...new Set([raw, stripped, core].filter((q) => q && q.length > 2))];
+  },
+
+  levenshtein(a, b) {
+    const m = a.length, n = b.length;
+    if (!m) return n;
+    if (!n) return m;
+    const dp = Array(n + 1).fill(0).map((_, i) => i);
+    for (let i = 1; i <= m; i++) {
+      let prev = dp[0];
+      dp[0] = i;
+      for (let j = 1; j <= n; j++) {
+        const tmp = dp[j];
+        dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]);
+        prev = tmp;
+      }
+    }
+    return dp[n];
+  },
+
+  fuzzyWordMatch(queryWord, targetWord) {
+    if (!queryWord || !targetWord) return 0;
+    if (queryWord === targetWord) return 1;
+    if (queryWord.length >= 4 && targetWord.startsWith(queryWord)) return 0.88;
+    if (targetWord.length >= 4 && queryWord.startsWith(targetWord)) return 0.88;
+    const maxLen = Math.max(queryWord.length, targetWord.length);
+    if (maxLen >= 5) {
+      const dist = this.levenshtein(queryWord, targetWord);
+      if (dist <= 1) return 0.78;
+      if (dist <= 2 && maxLen >= 7) return 0.58;
+    }
+    return 0;
+  },
+
+  tokenOverlapScore(queryTokens, targetText) {
+    const targetTokens = RAGModule.tokenize(targetText);
+    if (!queryTokens.length || !targetTokens.length) return 0;
+    let score = 0;
+    queryTokens.forEach((qt) => {
+      let best = 0;
+      targetTokens.forEach((tt) => {
+        best = Math.max(best, this.fuzzyWordMatch(qt, tt));
+      });
+      score += best;
+    });
+    return Math.min(1, score / Math.max(queryTokens.length, 1));
+  },
+
+  scoreKnowledgeEntry(entry, query) {
+    const qNorm = this.normalize(query);
+    const qCore = this.coreTokens(query);
+    const qExpanded = RAGModule.expandQueryTokens(this.stripFillers(query) || query);
+    const tokenSet = qCore.length ? qCore : qExpanded;
+
+    const title = entry.pregunta || entry.title || '';
+    const content = entry.respuesta || entry.response || entry.content || '';
+    const keywords = KnowledgeBaseModule.getKeywords(entry);
+    const category = entry.categoria || entry.category || '';
+    const gadgetEntry = entry.gadgetId ? GadgetKBModule.getById(entry.gadgetId) : null;
+    const questionField = gadgetEntry?.question || entry.question || '';
+
+    const kwResult = GadgetKBModule.calculateMatchScore(query, keywords);
+    let score = Math.min(1, kwResult.score / 10);
+
+    const titleOverlap = this.tokenOverlapScore(tokenSet, title);
+    score = Math.max(score, titleOverlap * 0.96);
+
+    const questionOverlap = questionField ? this.tokenOverlapScore(tokenSet, questionField) : 0;
+    score = Math.max(score, questionOverlap * 0.94);
+
+    const contentOverlap = this.tokenOverlapScore(tokenSet, content);
+    score = Math.max(score, contentOverlap * 0.42);
+
+    if (category) {
+      const catNorm = this.normalize(category);
+      if (catNorm.length > 3 && (qNorm.includes(catNorm) || this.tokenOverlapScore(tokenSet, category) > 0.4)) {
+        score = Math.max(score, 0.38);
+      }
+    }
+
+    const titleNorm = this.normalize(title);
+    if (titleNorm.length > 5) {
+      if (qNorm === titleNorm) score = Math.max(score, 0.98);
+      else if (qNorm.includes(titleNorm) || titleNorm.includes(qNorm)) score = Math.max(score, 0.76);
+    }
+
+    const qEmbed = RAGModule.hashEmbed(qExpanded);
+    const entryTokens = RAGModule.tokenize(`${title} ${content} ${keywords.join(' ')} ${questionField}`);
+    const eEmbed = RAGModule.hashEmbed(entryTokens);
+    score = Math.max(score, RAGModule.cosineSim(qEmbed, eEmbed) * 0.9);
+
+    if (Array.isArray(entry.suggestedQuestions)) {
+      entry.suggestedQuestions.forEach((sq) => {
+        const sqScore = this.tokenOverlapScore(tokenSet, sq);
+        if (sqScore > 0.45) score = Math.max(score, sqScore * 0.93);
+      });
+    }
+
+    return { score: Math.min(1, score), rawScore: kwResult.score, matches: kwResult.matches, titleOverlap, contentOverlap };
+  }
+};
+
 /* ─── ResponseEngine — Motor coherente de comprensión y respuesta ─── */
 const ResponseEngine = {
-  FOLLOW_UP: /^(y |pero |también|tambien|ok |cuál|cual|como|cómo|donde|dónde|cuando|cuándo|eso|esa|ese|allí|alli|ahí|ahi|mas|más|otra|otro)\b/i,
+  FOLLOW_UP: /^(y |pero |también|tambien|ok |cuál|cual|como|cómo|donde|dónde|cuando|cuándo|eso|esa|ese|allí|alli|ahí|ahi|mas|más|otra|otro|y eso|y eso\?|cuanto|cuánto)\b/i,
 
   /** Detecta intención del mensaje */
   analyzeIntent(text, conv) {
@@ -6176,41 +6407,64 @@ const ResponseEngine = {
     return 'question';
   },
 
-  /** Enriquece consulta con contexto conversacional reciente */
+  /** Enriquece consulta con contexto conversacional y limpia lenguaje coloquial */
   buildContextualQuery(text, conv) {
+    const cleaned = QueryUnderstandingModule.stripFillers(text) || text.trim();
     const users = (conv?.messages || []).filter(m => m.type === 'user').map(m => m.text);
-    if (users.length <= 1) return text.trim();
+    if (users.length <= 1) return cleaned;
+
+    const bots = (conv?.messages || []).filter(m => m.type === 'bot' && m.topicTitle);
+    const lastTopic = bots.length ? bots[bots.length - 1].topicTitle : '';
     const prev = users[users.length - 2];
-    if (text.length < 45 || this.FOLLOW_UP.test(text) || !RAGModule.search(text, 1).length) {
-      return (prev + ' ' + text).trim();
+    const isFollowUp = cleaned.length < 50 || this.FOLLOW_UP.test(text);
+
+    if (isFollowUp || !RAGModule.search(cleaned, 1).length) {
+      return QueryUnderstandingModule.stripFillers([lastTopic, prev, cleaned].filter(Boolean).join(' '));
     }
-    return text.trim();
+    return cleaned;
   },
 
-  /** Puntúa coincidencia pregunta-respuesta manual */
-  scoreManualEntry(entry, query) {
-    return KnowledgeBaseModule.scoreEntry(entry, query).score;
+  /** Busca la mejor coincidencia probando variantes de la pregunta */
+  searchBestKnowledge(query) {
+    const variants = QueryUnderstandingModule.queryVariants(query);
+    let best = null;
+    variants.forEach((q) => {
+      const ranked = KnowledgeBaseModule.searchRanked(q, 0.16, 3);
+      ranked.forEach(({ entry, score }) => {
+        const candidate = {
+          source: 'manual',
+          score,
+          title: entry.pregunta,
+          content: entry.respuesta,
+          category: entry.categoria,
+          raw: entry,
+          fullContent: true
+        };
+        if (!best || candidate.score > best.score) best = candidate;
+      });
+    });
+    return best;
   },
 
   /** Recupera la mejor fuente unificada (base manual + documentos RAG) */
   retrieve(query) {
-    const manualMatch = KnowledgeBaseModule.search(query, 0.2);
+    const manualMatch = this.searchBestKnowledge(query);
 
-    // Coincidencia directa en base manual → respuesta completa, sin recortar
-    if (manualMatch && manualMatch.score >= 0.25) {
+    if (manualMatch && manualMatch.score >= 0.30) {
       return manualMatch;
     }
 
     const candidates = [];
     if (manualMatch) candidates.push(manualMatch);
 
-    const ragResults = RAGModule.search(query, 5);
-    if (ragResults.length && ragResults[0].score >= 0.06) {
+    QueryUnderstandingModule.queryVariants(query).forEach((q) => {
+      const ragResults = RAGModule.search(q, 5);
+      if (!ragResults.length || ragResults[0].score < 0.05) return;
       const top = ragResults[0];
       const ragManual = top.source === 'manual';
       candidates.push({
         source: ragManual ? 'manual' : (top.source || 'document'),
-        score: ragManual ? Math.min(1, Math.max(top.score / 0.35, 0.45)) : Math.min(1, top.score / 0.42),
+        score: ragManual ? Math.min(1, Math.max(top.score / 0.32, top.coreOverlap || 0, 0.48)) : Math.min(1, top.score / 0.4),
         title: top.title,
         content: top.content,
         category: top.category,
@@ -6218,11 +6472,18 @@ const ResponseEngine = {
         fullContent: ragManual,
         ragResults: ragManual ? undefined : ragResults
       });
-    }
+    });
 
     candidates.sort((a, b) => b.score - a.score);
     const best = candidates[0] || null;
     if (best && best.source === 'manual' && !best.fullContent) best.fullContent = true;
+
+    if (best && candidates.length > 1) {
+      const margin = best.score - candidates[1].score;
+      if (margin < 0.04 && manualMatch && manualMatch.score >= 0.22) {
+        return manualMatch;
+      }
+    }
     return best;
   },
 
@@ -6269,9 +6530,9 @@ const ResponseEngine = {
 
     if (!confident && medium) {
       const related = this.findRelatedTopics(query, match.title);
-      if (related.length && match.score < 0.38) {
+      if (related.length && match.score < 0.36) {
         const suggestions = related.map(p => p.entry.pregunta).join('\n• ');
-        body += `\n\nTambién podría interesarte:\n• ${suggestions}`;
+        body += `\n\n¿Te referías a alguno de estos temas?\n• ${suggestions}`;
       }
     }
 
@@ -8117,8 +8378,6 @@ const TrainingModule = {
     document.getElementById('setWelcomeMsg').value = database.settings.welcomeMessage;
     if (result?.cloud) {
       toast('Contenido del chat sincronizado en todos los dispositivos', 'success');
-    } else {
-      toast('Guardado local. Sin conexión a la nube.', 'warning');
     }
   },
   /** Renderiza tabla entrenamiento manual */
@@ -8192,6 +8451,8 @@ const TrainingModule = {
       const idx = database.manualKnowledge.findIndex(k => k.id === editId);
       if (idx >= 0) {
         database.manualKnowledge[idx] = { ...database.manualKnowledge[idx], ...data };
+      } else {
+        database.manualKnowledge.unshift({ id: editId, origin: 'manual', ...data, createdAt: Date.now() });
       }
     } else {
       database.manualKnowledge.unshift({ id: DatabaseModule.uid('k'), origin: 'manual', ...data, createdAt: Date.now() });
@@ -8736,7 +8997,7 @@ const App = {
       this.showCloudSyncLoading(false);
     } else {
       this.showCloudSyncLoading(false);
-      toast('No se pudo sincronizar con la nube. Los cambios de otros equipos no se verán hasta conectar.', 'error');
+      toast('No se pudo conectar con Firestore. Todos los datos viven en la nube.', 'error');
     }
 
     SettingsModule.apply();
@@ -8775,9 +9036,7 @@ const App = {
 
     window.addEventListener('online', () => {
       if (typeof ArturitoCloud === 'undefined' || !ArturitoCloud.store) return;
-      void ArturitoCloud.store.flushPendingCloud(database).then(() =>
-        ArturitoCloud.store.refreshFromCloud(database, (type) => App.applyCloudUpdate(type))
-      );
+      void ArturitoCloud.store.refreshFromCloud(database, (type) => App.applyCloudUpdate(type));
     });
 
     const cloudOn = typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled?.();
