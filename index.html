@@ -2659,6 +2659,23 @@ const ARTURITO_GADGET_KB_SEED = [
       return data;
     }
 
+    async delete(id) {
+      if (!id) return;
+      const { deleteDoc, doc, getDocs, query, where, writeBatch } = this.fb._modules;
+      try {
+        const q = query(this.fb.col('ticket_responses'), where('ticketId', '==', id));
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          const batch = writeBatch(this.fb.db);
+          snap.docs.forEach((d) => batch.delete(d.ref));
+          await batch.commit();
+        }
+      } catch (err) {
+        console.warn('[Cloud] delete ticket responses:', err);
+      }
+      await deleteDoc(doc(this.fb.col('tickets'), id));
+    }
+
     async addResponse(ticketId, { usuarioId, mensaje, adjuntos = [] }) {
       const { addDoc } = this.fb._modules;
       const ref = await addDoc(this.fb.col('ticket_responses'), {
@@ -3115,11 +3132,68 @@ const ARTURITO_GADGET_KB_SEED = [
       }).join('|');
     }
 
+    rebuildChatAnalyticsSummary(interactions) {
+      const s = {
+        totalInteractions: 0,
+        totalRatings: 0,
+        ratingSum: 0,
+        bySource: {},
+        ratingCounts: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
+      };
+      (interactions || []).forEach((i) => {
+        s.totalInteractions += 1;
+        const src = i.source || 'unknown';
+        s.bySource[src] = (s.bySource[src] || 0) + 1;
+        if (i.rating != null) {
+          s.totalRatings += 1;
+          s.ratingSum += i.rating;
+          s.ratingCounts[i.rating] = (s.ratingCounts[i.rating] || 0) + 1;
+        }
+      });
+      return s;
+    }
+
+    async pushChatInteraction(entry) {
+      if (!this.fb.isEnabled() || !entry?.id) return;
+      const { setDoc, doc } = this.fb._modules;
+      await setDoc(doc(this.fb.col('chat_interactions'), entry.id), {
+        conversationId: entry.conversationId || '',
+        messageId: entry.messageId || '',
+        userQuery: entry.userQuery || '',
+        topicTitle: entry.topicTitle || '',
+        source: entry.source || 'unknown',
+        intent: entry.intent || 'question',
+        confidence: entry.confidence ?? null,
+        rating: entry.rating ?? null,
+        createdAt: entry.createdAt || Date.now(),
+        ratedAt: entry.ratedAt || null
+      }, { merge: true });
+    }
+
+    async pullChatInteractions(database, forceServer = true) {
+      if (!this.fb.isEnabled()) return false;
+      const { getDocs, getDocsFromServer } = this.fb._modules;
+      let snap = null;
+      if (forceServer && getDocsFromServer) {
+        try { snap = await getDocsFromServer(this.fb.col('chat_interactions')); } catch (_) {}
+      }
+      if (!snap) snap = await getDocs(this.fb.col('chat_interactions'));
+      const remote = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+        .slice(-500);
+      if (JSON.stringify(remote) === JSON.stringify(database.chatInteractions || [])) return false;
+      database.chatInteractions = remote;
+      database.settings = database.settings || {};
+      database.settings.chatAnalytics = this.rebuildChatAnalyticsSummary(remote);
+      this._cacheLocal(database);
+      return true;
+    }
+
     /** Descarga KB y settings públicos desde el servidor (sin caché) */
     async pullPublicCloudData(database, forceServer = true) {
-      if (!this.fb.isEnabled()) return { settings: false, gadgetKB: false, knowledge: false };
+      if (!this.fb.isEnabled()) return { settings: false, gadgetKB: false, knowledge: false, analytics: false };
       const { getDoc, getDocFromServer, getDocs, getDocsFromServer } = this.fb._modules;
-      const changes = { settings: false, gadgetKB: false, knowledge: false };
+      const changes = { settings: false, gadgetKB: false, knowledge: false, analytics: false };
       const settingsRef = this.fb.doc(`condominios/${this._cid()}/settings/main`);
       try {
         let settingsSnap = null;
@@ -3166,6 +3240,7 @@ const ARTURITO_GADGET_KB_SEED = [
           this.applyUnifiedKnowledge(database);
           this._cacheLocal(database);
         }
+        if (await this.pullChatInteractions(database, forceServer)) changes.analytics = true;
       } catch (err) {
         console.warn('[CloudSync] pullPublicCloudData:', err);
       }
@@ -3198,6 +3273,9 @@ const ARTURITO_GADGET_KB_SEED = [
         chatMessages: s.chatMessages ? { ...s.chatMessages } : {},
         gadgetCategories: s.gadgetCategories ? JSON.parse(JSON.stringify(s.gadgetCategories)) : {},
         gadgetCategoryOrder: Array.isArray(s.gadgetCategoryOrder) ? s.gadgetCategoryOrder.slice() : [],
+        chatAnalytics: s.chatAnalytics ? JSON.parse(JSON.stringify(s.chatAnalytics)) : {
+          totalInteractions: 0, totalRatings: 0, ratingSum: 0, bySource: {}, ratingCounts: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
+        },
         updatedAt: Date.now()
       };
       return JSON.parse(JSON.stringify(payload));
@@ -3425,6 +3503,24 @@ const ARTURITO_GADGET_KB_SEED = [
       );
       this._unsubs.push(manualUnsub);
 
+      const analyticsUnsub = onSnapshot(
+        this.fb.col('chat_interactions'),
+        (snap) => {
+          if (this._pushing) return;
+          const remote = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+            .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+            .slice(-500);
+          if (JSON.stringify(remote) === JSON.stringify(database.chatInteractions || [])) return;
+          database.chatInteractions = remote;
+          database.settings = database.settings || {};
+          database.settings.chatAnalytics = this.rebuildChatAnalyticsSummary(remote);
+          this._cacheLocal(database);
+          if (onUpdate) onUpdate('analytics');
+        },
+        this._snapErr('chat_interactions')
+      );
+      this._unsubs.push(analyticsUnsub);
+
       this.bindTicketsWatch(database, onUpdate);
     }
 
@@ -3544,6 +3640,25 @@ const ARTURITO_GADGET_KB_SEED = [
         })());
       }
 
+      if (scope === 'analytics' || scope === 'full') {
+        ops.push((async () => {
+          try {
+            if (options.interaction) {
+              await this.sync.pushChatInteraction(options.interaction);
+            }
+            database.settings = database.settings || {};
+            database.settings.updatedAt = Date.now();
+            await this.sync.ensureCondominioDoc(database.settings?.buildingName);
+            await this.sync.syncSettings(database.settings);
+            localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
+          } catch (err) {
+            cloudOk = false;
+            lastErr = err;
+            console.warn('[DataStore] persist analytics:', err);
+          }
+        })());
+      }
+
       try {
         await Promise.all(ops);
         if (cloudOk) this.sync._cacheLocal(database);
@@ -3611,6 +3726,7 @@ const ARTURITO_GADGET_KB_SEED = [
       if (changes.settings && onSync) { onSync('settings'); synced = true; }
       if (changes.gadgetKB && onSync) { onSync('gadgetKB'); synced = true; }
       if (changes.knowledge && onSync) { onSync('knowledge'); synced = true; }
+      if (changes.analytics && onSync) { onSync('analytics'); synced = true; }
       return synced;
     }
   }
@@ -3960,6 +4076,7 @@ const DatabaseModule = {
       manualKnowledge: [],
       gadgetKB: [],
       conversations: [],
+      chatInteractions: [],
       settings: {
         buildingName: 'Edificio Hipódromo',
         logo: '',
@@ -4058,7 +4175,7 @@ const DatabaseModule = {
     }
     if (typeof KnowledgeBaseModule !== 'undefined') KnowledgeBaseModule.syncFromGadget();
   },
-  /** Persiste local + nube (UnifiedDataStore). scope: local | settings | gadgetKB | knowledge | full */
+  /** Persiste local + nube (UnifiedDataStore). scope: local | settings | gadgetKB | knowledge | analytics | full */
   async save(scope = 'local', options = {}) {
     if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.store) {
       const result = await ArturitoCloud.store.persist(database, scope, options);
@@ -6178,7 +6295,7 @@ const ChatAnalyticsModule = {
     }
     this.bumpSummary(entry, false);
     DatabaseModule.save();
-    void DatabaseModule.save('settings');
+    void DatabaseModule.save('analytics', { interaction: entry });
     return entry;
   },
 
@@ -6231,7 +6348,7 @@ const ChatAnalyticsModule = {
     });
     this.cancelRating(messageId);
     DatabaseModule.save();
-    void DatabaseModule.save('settings');
+    void DatabaseModule.save('analytics', { interaction: entry });
     if (typeof TrainingModule !== 'undefined' && App?.mode === 'admin') TrainingModule.renderStats();
     ChatModule.renderMessages('bot-start');
     toast('¡Gracias por evaluar la respuesta!', 'success');
@@ -6926,13 +7043,28 @@ const TicketModule = {
       if (submitBtn) submitBtn.disabled = false;
     }
   },
-  /** Elimina ticket */
+  /** Elimina ticket (Firestore primero; requiere sesión Firebase Auth) */
   async remove(id) {
     if (!confirm('¿Eliminar ticket ' + id + '?')) return;
-    await TicketAttachmentModule.deleteByTicket(id);
-    database.tickets = database.tickets.filter(t => t.id !== id);
-    DatabaseModule.save(); this.render(); AdminModule.render(); ReportModule.render();
-    toast('Ticket eliminado', 'info');
+    try {
+      await TicketAttachmentModule.deleteByTicket(id);
+      if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled()) {
+        if (!ArturitoCloud.fb.auth?.currentUser) {
+          toast('Inicia sesión con Firebase Auth para eliminar tickets de forma permanente.', 'warning');
+          return;
+        }
+        await ArturitoCloud.tickets.delete(id);
+      }
+      database.tickets = database.tickets.filter(t => t.id !== id);
+      DatabaseModule.save();
+      this.render();
+      AdminModule.render();
+      ReportModule.render();
+      toast('Ticket eliminado de la nube', 'success');
+    } catch (err) {
+      console.warn('[Ticket] delete:', err);
+      toast('No se pudo eliminar el ticket. Verifica permisos Firebase Auth.', 'error');
+    }
   },
   /** Exporta tickets a CSV (Excel) */
   exportExcel() {
@@ -8228,6 +8360,12 @@ const App = {
     if (type === 'settings' && this.mode === 'admin') {
       TrainingModule.renderChatContentForm?.();
       TrainingModule.renderStats?.();
+    }
+    if (type === 'analytics') {
+      if (this.mode === 'admin') {
+        TrainingModule.renderStats?.();
+        ReportModule.render?.();
+      }
     }
     if (type === 'gadgetKB' || type === 'knowledge') {
       KnowledgeBaseModule.syncFromGadget();
