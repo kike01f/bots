@@ -688,6 +688,16 @@ body.mode-client #adminApp{display:none!important}
 .stat-card.purple .stat-value{color:#7c3aed}
 .chat-confidence{font-size:.68rem;font-weight:700;margin-top:.35rem;padding:.2rem .45rem;border-radius:6px;display:inline-block;background:rgba(127,186,2,.12);color:var(--arturito-green-dark,#5a8501)}
 .chat-confidence.low{background:rgba(245,158,11,.15);color:#b45309}
+.chat-rating-prompt{margin-top:.45rem;padding:.55rem .65rem;background:linear-gradient(135deg,rgba(127,186,2,.08),rgba(99,102,241,.06));border-radius:10px;border:1px solid rgba(127,186,2,.22);animation:msgIn .35s ease}
+.chat-rating-prompt p{font-size:.72rem;color:var(--text-muted,#6b7280);margin:0 0 .4rem;font-weight:600}
+.chat-rating-stars{display:flex;gap:.15rem;align-items:center;flex-wrap:wrap}
+.chat-rating-stars button{background:none;border:none;font-size:1.35rem;line-height:1;cursor:pointer;color:#f59e0b;opacity:.35;transition:opacity .15s,transform .15s;padding:.05rem .1rem}
+.chat-rating-stars button:hover,.chat-rating-stars button:focus{opacity:1;transform:scale(1.12);outline:none}
+.chat-rating-dismiss{display:block;margin-top:.35rem;background:none;border:none;font-size:.68rem;color:var(--text-muted);cursor:pointer;padding:0;text-decoration:underline}
+.chat-rating-done{font-size:.68rem;color:var(--arturito-green-dark);margin-top:.35rem;font-weight:600}
+.chat-interactions-table{width:100%;border-collapse:collapse;font-size:.78rem;margin-top:.5rem}
+.chat-interactions-table th,.chat-interactions-table td{padding:.45rem .5rem;text-align:left;border-bottom:1px solid var(--border,#e5e7eb)}
+.chat-interactions-table th{font-size:.7rem;color:var(--text-muted);font-weight:700}
 .chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;margin-top:1rem}
 .chart-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:1rem}
 .chart-card h4{font-size:.85rem;margin-bottom:.75rem;color:var(--text-muted);font-weight:600}
@@ -1023,6 +1033,14 @@ body.mode-client #adminApp{display:none!important}
             <div class="training-stat"><div class="training-stat-value" id="statTotalChars">0</div><div class="training-stat-label">Caracteres indexados</div></div>
             <div class="training-stat"><div class="training-stat-value" id="statTopicCount">0</div><div class="training-stat-label">Temas detectados</div></div>
             <div class="training-stat"><div class="training-stat-value" id="statLastUpload">—</div><div class="training-stat-label">Última carga</div></div>
+            <div class="training-stat"><div class="training-stat-value" id="statChatInteractions">0</div><div class="training-stat-label">Interacciones chat</div></div>
+            <div class="training-stat"><div class="training-stat-value" id="statChatRatings">0</div><div class="training-stat-label">Evaluaciones</div></div>
+            <div class="training-stat"><div class="training-stat-value" id="statChatAvgRating">—</div><div class="training-stat-label">Calificación prom.</div></div>
+            <div class="training-stat"><div class="training-stat-value" id="statChatWeek">0</div><div class="training-stat-label">Interacciones (7 días)</div></div>
+          </div>
+          <div class="card" id="chatInteractionsCard">
+            <div class="card-header"><span class="card-title">Interacciones recientes del chat</span></div>
+            <div class="table-wrap" id="chatInteractionsTableWrap"><p style="font-size:.8rem;color:var(--text-muted)">Sin interacciones registradas aún.</p></div>
           </div>
           <div class="card">
             <div class="card-header"><span class="card-title">Acciones del índice</span></div>
@@ -1056,6 +1074,7 @@ body.mode-client #adminApp{display:none!important}
           <div class="card chart-card"><div class="card-title" style="margin-bottom:.75rem">Tickets por Prioridad</div><canvas id="chartPriority"></canvas></div>
           <div class="card chart-card" style="grid-column:1/-1"><div class="card-title" style="margin-bottom:.75rem">Evolución Mensual</div><canvas id="chartMonthly" style="height:280px!important"></canvas></div>
           <div class="card chart-card"><div class="card-title" style="margin-bottom:.75rem">Rendimiento Chatbot (confianza)</div><canvas id="chartChatbot"></canvas></div>
+          <div class="card chart-card"><div class="card-title" style="margin-bottom:.75rem">Calidad de respuestas (1-5 ★)</div><canvas id="chartChatRatings"></canvas></div>
           <div class="card chart-card"><div class="card-title" style="margin-bottom:.75rem">Uso de la plataforma</div><canvas id="chartUsage"></canvas></div>
         </div>
       </section>
@@ -2895,7 +2914,7 @@ const ARTURITO_GADGET_KB_SEED = [
     'buildingName', 'logo', 'primaryColor', 'secondaryColor', 'botName',
     'welcomeMessage', 'portalTagline', 'portalHint', 'theme',
     'quickQuestions', 'topicsMenuIntro', 'showTopicsOnWelcome',
-    'chatShortcuts', 'chatMessages', 'gadgetCategories', 'gadgetCategoryOrder', 'updatedAt'
+    'chatShortcuts', 'chatMessages', 'gadgetCategories', 'gadgetCategoryOrder', 'chatAnalytics', 'updatedAt'
   ];
 
   class CloudSyncBridge {
@@ -3133,7 +3152,8 @@ const ARTURITO_GADGET_KB_SEED = [
             getDocs(this.fb.col('knowledge_base'))
           ]);
         }
-        const remoteGadget = gadgetSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const remoteGadget = gadgetSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (a.order || 0) - (b.order || 0));
         const remoteManual = manualSnap.docs.map((d) => this.mapManualFromCloud(d.id, d.data()));
         if (JSON.stringify(remoteGadget) !== JSON.stringify(database.gadgetKB || [])) changes.gadgetKB = true;
         if (JSON.stringify(remoteManual) !== JSON.stringify(database.manualKnowledge || [])) changes.knowledge = true;
@@ -3370,9 +3390,10 @@ const ARTURITO_GADGET_KB_SEED = [
         this.fb.col('gadget_kb'),
         (snap) => {
           if (this._pushing) return;
-          const remote = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          const remote = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+            .sort((a, b) => (a.order || 0) - (b.order || 0));
           if (!remote.length && !this._cloudKBActive && (database.gadgetKB?.length || 0) > 0) return;
-          if (remote.length) this._cloudKBActive = true;
+          this._cloudKBActive = true;
           if (JSON.stringify(remote) === JSON.stringify(database.gadgetKB || [])) return;
           this._syncing = true;
           database.gadgetKB = remote;
@@ -3391,7 +3412,7 @@ const ARTURITO_GADGET_KB_SEED = [
           if (this._pushing) return;
           const remote = snap.docs.map((d) => this.mapManualFromCloud(d.id, d.data()));
           if (!remote.length && !this._cloudKBActive && (database.manualKnowledge?.length || 0) > 0) return;
-          if (remote.length) this._cloudKBActive = true;
+          this._cloudKBActive = true;
           if (JSON.stringify(remote) === JSON.stringify(database.manualKnowledge || [])) return;
           this._syncing = true;
           database.manualKnowledge = remote;
@@ -3525,6 +3546,7 @@ const ARTURITO_GADGET_KB_SEED = [
 
       try {
         await Promise.all(ops);
+        if (cloudOk) this.sync._cacheLocal(database);
         if (!cloudOk && lastErr) {
           this._enqueuePending(scope, options);
           const msg = lastErr.message || String(lastErr);
@@ -3899,7 +3921,7 @@ const SESSION_KEY = 'arturito_admin_session';
 const ARTURITO_SVG = `<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><clipPath id="arturitoFaceClip"><rect x="22" y="34" width="20" height="14" rx="1"/></clipPath></defs><rect x="16" y="28" width="32" height="28" rx="6" fill="#7FBA02"/><rect x="18" y="30" width="28" height="24" rx="4" fill="#8FCB1A"/><rect x="20" y="32" width="24" height="18" rx="2" fill="#1a1a1a"/><rect x="22" y="34" width="20" height="14" rx="1" fill="#2a2a2a"/><rect x="22" y="34" width="8" height="2" rx="1" fill="#fff" opacity="0.3"/><g class="blinking-eyes expression-eyes" clip-path="url(#arturitoFaceClip)"><circle cx="28" cy="40" r="2.5" fill="#7FBA02"/><circle cx="36" cy="40" r="2.5" fill="#7FBA02"/><circle cx="28.5" cy="39.5" r="1" fill="#8FCB1A"/><circle cx="36.5" cy="39.5" r="1" fill="#8FCB1A"/></g><path class="expression-mouth" d="M26 44 Q32 48 38 44" stroke="#7FBA02" stroke-width="2" stroke-linecap="round" fill="none"/><g class="waving-hand"><circle cx="50" cy="20" r="6" fill="#7FBA02" opacity="0.9"/><circle cx="50" cy="20" r="5" fill="#8FCB1A" opacity="0.7"/><path d="M46 24 L50 28 L54 24" fill="#7FBA02" opacity="0.9"/><circle cx="14" cy="18" r="4" fill="#7FBA02" opacity="0.8"/><circle cx="14" cy="18" r="3" fill="#8FCB1A" opacity="0.6"/><path d="M12 22 L14 25 L16 22" fill="#7FBA02" opacity="0.8"/></g><circle cx="24" cy="28" r="2" fill="#FFD700"/><circle cx="40" cy="28" r="2" fill="#FFD700"/><rect x="20" y="54" width="24" height="4" rx="2" fill="#5a8501"/></svg>`;
 
 /** Base de datos en memoria — la nube (Firestore) es la fuente de verdad */
-let database = { users: [], tickets: [], knowledge: [], gadgetKB: [], conversations: [], settings: {} };
+let database = { users: [], tickets: [], knowledge: [], gadgetKB: [], conversations: [], chatInteractions: [], settings: {} };
 let currentConversationId = null;
 let sortState = { field: 'createdAt', dir: -1 };
 
@@ -4027,6 +4049,13 @@ const DatabaseModule = {
       }
     }
     if (!database.conversations) database.conversations = [];
+    if (!database.chatInteractions) database.chatInteractions = [];
+    if (!database.settings.chatAnalytics) {
+      database.settings.chatAnalytics = {
+        totalInteractions: 0, totalRatings: 0, ratingSum: 0,
+        bySource: {}, ratingCounts: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
+      };
+    }
     if (typeof KnowledgeBaseModule !== 'undefined') KnowledgeBaseModule.syncFromGadget();
   },
   /** Persiste local + nube (UnifiedDataStore). scope: local | settings | gadgetKB | knowledge | full */
@@ -5214,9 +5243,8 @@ const GadgetKBModule = {
     KnowledgeBaseModule.syncFromGadget();
     const savedId = editId || database.gadgetKB[database.gadgetKB.length - 1]?.id;
     const r = await DatabaseModule.save('gadgetKB', { gadget: { changedIds: savedId ? [savedId] : [] } });
-    if (r?.cloud) toast('Tema Gadget respaldado en la nube', 'success');
     void RAGModule.rebuildIndex();
-    return payload;
+    return r;
   },
 
   async deleteEntry(id) {
@@ -5999,6 +6027,22 @@ const ResponseEngine = {
   },
 
   /** Procesa mensaje y devuelve { text, expression, actions } */
+  buildAnalytics(intent, match, trackable = true) {
+    if (!trackable) return { intent, trackable: false };
+    let source = 'system';
+    if (match) {
+      source = match.source || 'unknown';
+      if (match.raw?.origin === 'gadget' || match.raw?.gadgetId) source = 'gadget';
+    }
+    return {
+      intent,
+      trackable: true,
+      source,
+      topicId: match?.raw?.gadgetId || match?.raw?.id || null,
+      topicTitle: match?.title || match?.raw?.pregunta || ''
+    };
+  },
+
   respond(userText, conv) {
     const intent = this.analyzeIntent(userText, conv);
     const ticketActions = [
@@ -6007,29 +6051,29 @@ const ResponseEngine = {
     ];
 
     if (intent === 'escalate') {
-      return { text: getChatMsg('escalate'), expression: 'happy', actions: ticketActions };
+      return { text: getChatMsg('escalate'), expression: 'happy', actions: ticketActions, analytics: this.buildAnalytics('escalate', null, true) };
     }
     if (intent === 'ticket_create') {
-      return { text: getChatMsg('ticketPrompt'), expression: 'happy', actions: [{ label: 'Crear solicitud', icon: 'ticket', fn: 'TicketModule.openCreateFromChat()' }] };
+      return { text: getChatMsg('ticketPrompt'), expression: 'happy', actions: [{ label: 'Crear solicitud', icon: 'ticket', fn: 'TicketModule.openCreateFromChat()' }], analytics: this.buildAnalytics('ticket_create', null, true) };
     }
     if (intent === 'ticket_status') {
       const deptoMatch = userText.match(/\d{3,4}/);
       const tickets = database.tickets.filter(t => !deptoMatch || t.departamento.includes(deptoMatch[0]));
       if (tickets.length) {
         const list = tickets.slice(0, 5).map(t => `• ${t.id} — ${t.categoria} — ${t.estado}`).join('\n');
-        return { text: 'Estas son las solicitudes que encontré:\n\n' + list + '\n\n' + ARTURITO_PERSONALITY.pick(ARTURITO_PERSONALITY.closings), expression: 'happy' };
+        return { text: 'Estas son las solicitudes que encontré:\n\n' + list + '\n\n' + ARTURITO_PERSONALITY.pick(ARTURITO_PERSONALITY.closings), expression: 'happy', analytics: this.buildAnalytics('ticket_status', null, true) };
       }
-      return { text: getChatMsg('noTickets'), expression: 'happy', actions: [{ label: 'Crear solicitud', icon: 'ticket', fn: 'TicketModule.openCreateFromChat()' }] };
+      return { text: getChatMsg('noTickets'), expression: 'happy', actions: [{ label: 'Crear solicitud', icon: 'ticket', fn: 'TicketModule.openCreateFromChat()' }], analytics: this.buildAnalytics('ticket_status', null, true) };
     }
     if (intent === 'greeting') {
       const botMsgs = (conv?.messages || []).filter(m => m.type === 'bot').length;
       if (botMsgs > 0) {
-        return { text: '¡Hola de nuevo! Cuéntame, ¿qué necesitas saber del edificio?', expression: 'happy' };
+        return { text: '¡Hola de nuevo! Cuéntame, ¿qué necesitas saber del edificio?', expression: 'happy', analytics: this.buildAnalytics('greeting', null, false) };
       }
-      return { text: database.settings.welcomeMessage?.trim() || ARTURITO_PERSONALITY.getGreeting(), expression: 'happy' };
+      return { text: database.settings.welcomeMessage?.trim() || ARTURITO_PERSONALITY.getGreeting(), expression: 'happy', analytics: this.buildAnalytics('greeting', null, false) };
     }
     if (['thanks', 'goodbye', 'affirmative'].includes(intent)) {
-      return { text: this.compose(userText, null, intent), expression: 'happy' };
+      return { text: this.compose(userText, null, intent), expression: 'happy', analytics: this.buildAnalytics(intent, null, false) };
     }
 
     const query = this.buildContextualQuery(userText, conv);
@@ -6043,14 +6087,187 @@ const ResponseEngine = {
       const expression = match && match.score >= 0.42 ? 'happy' : (match && match.score >= 0.28 ? 'think' : 'confused');
       const escalate = confidence < 70;
       const actions = escalate ? ticketActions : undefined;
-      return { text, expression, confidence, escalate, actions, partial: match && match.score < 0.28 };
+      return { text, expression, confidence, escalate, actions, partial: match && match.score < 0.28, analytics: this.buildAnalytics(intent, match, true) };
     }
 
     const customFallback = database.settings?.chatMessages?.fallback?.trim();
     const fallbackText = customFallback || ARTURITO_PERSONALITY.getFallback();
-    return { text: fallbackText, topicsMenu: true, expression: 'confused', actions: ticketActions, partial: true, confidence: 0, escalate: true };
+    return { text: fallbackText, topicsMenu: true, expression: 'confused', actions: ticketActions, partial: true, confidence: 0, escalate: true, analytics: this.buildAnalytics('fallback', null, true) };
   }
 };
+
+/* ─── ChatAnalyticsModule — Registro de interacciones y evaluaciones ─── */
+const ChatAnalyticsModule = {
+  RATING_DELAY_MS: 60000,
+  MAX_LOCAL: 500,
+  _timers: new Map(),
+
+  ensure() {
+    if (!database.chatInteractions) database.chatInteractions = [];
+    if (!database.settings.chatAnalytics) {
+      database.settings.chatAnalytics = {
+        totalInteractions: 0, totalRatings: 0, ratingSum: 0,
+        bySource: {}, ratingCounts: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
+      };
+    }
+  },
+
+  emptySummary() {
+    return { totalInteractions: 0, totalRatings: 0, ratingSum: 0, bySource: {}, ratingCounts: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 } };
+  },
+
+  mergeSummary(local, remote) {
+    const a = local || this.emptySummary();
+    const b = remote || this.emptySummary();
+    const bySource = { ...(b.bySource || {}) };
+    Object.entries(a.bySource || {}).forEach(([k, v]) => { bySource[k] = (bySource[k] || 0) + v; });
+    const ratingCounts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    [1, 2, 3, 4, 5].forEach((n) => {
+      ratingCounts[n] = (a.ratingCounts?.[n] || 0) + (b.ratingCounts?.[n] || 0);
+    });
+    return {
+      totalInteractions: (a.totalInteractions || 0) + (b.totalInteractions || 0),
+      totalRatings: (a.totalRatings || 0) + (b.totalRatings || 0),
+      ratingSum: (a.ratingSum || 0) + (b.ratingSum || 0),
+      bySource,
+      ratingCounts
+    };
+  },
+
+  bumpSummary(entry, ratingOnly = false) {
+    this.ensure();
+    const s = database.settings.chatAnalytics;
+    if (!ratingOnly) {
+      s.totalInteractions = (s.totalInteractions || 0) + 1;
+      const src = entry.source || 'unknown';
+      s.bySource = s.bySource || {};
+      s.bySource[src] = (s.bySource[src] || 0) + 1;
+    }
+    if (entry.rating != null) {
+      s.totalRatings = (s.totalRatings || 0) + 1;
+      s.ratingSum = (s.ratingSum || 0) + entry.rating;
+      s.ratingCounts = s.ratingCounts || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+      s.ratingCounts[entry.rating] = (s.ratingCounts[entry.rating] || 0) + 1;
+    }
+  },
+
+  shouldTrack(extra) {
+    if (!extra?.userQuery) return false;
+    if (extra.skipAnalytics || extra.analytics?.trackable === false) return false;
+    return true;
+  },
+
+  log(opts) {
+    this.ensure();
+    const entry = {
+      id: DatabaseModule.uid('ci'),
+      conversationId: opts.conversationId,
+      messageId: opts.messageId,
+      userQuery: String(opts.userQuery || '').slice(0, 500),
+      topicTitle: opts.topicTitle || '',
+      source: opts.source || 'unknown',
+      intent: opts.intent || 'question',
+      confidence: opts.confidence ?? null,
+      createdAt: Date.now(),
+      rating: null,
+      ratedAt: null
+    };
+    database.chatInteractions.push(entry);
+    if (database.chatInteractions.length > this.MAX_LOCAL) {
+      database.chatInteractions = database.chatInteractions.slice(-this.MAX_LOCAL);
+    }
+    this.bumpSummary(entry, false);
+    DatabaseModule.save();
+    void DatabaseModule.save('settings');
+    return entry;
+  },
+
+  scheduleRating(messageId, interactionId, conversationId) {
+    this.cancelRating(messageId);
+    const timer = setTimeout(() => {
+      this._timers.delete(messageId);
+      const conv = (database.conversations || []).find(c => c.id === conversationId);
+      if (!conv) return;
+      const msg = conv.messages.find(m => m.id === messageId);
+      if (!msg || msg.rated || msg.ratingDismissed) return;
+      const entry = database.chatInteractions.find(i => i.id === interactionId);
+      if (!entry || entry.rating != null) return;
+      msg.showRating = true;
+      DatabaseModule.save();
+      if (conv.id === currentConversationId) ChatModule.renderMessages('bot-start');
+    }, this.RATING_DELAY_MS);
+    this._timers.set(messageId, timer);
+  },
+
+  cancelRating(messageId) {
+    const t = this._timers.get(messageId);
+    if (t) { clearTimeout(t); this._timers.delete(messageId); }
+  },
+
+  applyPendingRatings(conv) {
+    if (!conv) return;
+    const now = Date.now();
+    conv.messages.forEach((m) => {
+      if (m.type !== 'bot' || !m.interactionId || m.rated || m.ratingDismissed || m.showRating) return;
+      const entry = database.chatInteractions.find(i => i.id === m.interactionId);
+      if (entry && entry.rating == null && now - m.time >= this.RATING_DELAY_MS) m.showRating = true;
+    });
+  },
+
+  submitRating(messageId, interactionId, rating) {
+    this.ensure();
+    const stars = Math.min(5, Math.max(1, parseInt(rating, 10) || 0));
+    const entry = database.chatInteractions.find(i => i.id === interactionId);
+    if (!entry || entry.rating != null) return;
+    entry.rating = stars;
+    entry.ratedAt = Date.now();
+    this.bumpSummary(entry, true);
+    (database.conversations || []).forEach((conv) => {
+      const msg = conv.messages.find(m => m.id === messageId);
+      if (!msg) return;
+      msg.rated = true;
+      msg.showRating = false;
+      msg.rating = stars;
+    });
+    this.cancelRating(messageId);
+    DatabaseModule.save();
+    void DatabaseModule.save('settings');
+    if (typeof TrainingModule !== 'undefined' && App?.mode === 'admin') TrainingModule.renderStats();
+    ChatModule.renderMessages('bot-start');
+    toast('¡Gracias por evaluar la respuesta!', 'success');
+  },
+
+  dismissRating(messageId) {
+    (database.conversations || []).forEach((conv) => {
+      const msg = conv.messages.find(m => m.id === messageId);
+      if (msg) { msg.ratingDismissed = true; msg.showRating = false; }
+    });
+    this.cancelRating(messageId);
+    DatabaseModule.save();
+    ChatModule.renderMessages('bot-start');
+  },
+
+  getStats() {
+    this.ensure();
+    const list = database.chatInteractions;
+    const cloud = database.settings.chatAnalytics || this.emptySummary();
+    const weekAgo = Date.now() - 7 * 86400000;
+    const rated = list.filter(i => i.rating != null);
+    const avgLocal = rated.length ? (rated.reduce((s, i) => s + i.rating, 0) / rated.length).toFixed(1) : null;
+    const avgCloud = cloud.totalRatings ? (cloud.ratingSum / cloud.totalRatings).toFixed(1) : null;
+    return {
+      total: Math.max(list.length, cloud.totalInteractions || 0),
+      totalCloud: cloud.totalInteractions || 0,
+      rated: Math.max(rated.length, cloud.totalRatings || 0),
+      avgRating: avgCloud || avgLocal || '—',
+      last7: list.filter(i => i.createdAt >= weekAgo).length,
+      bySource: cloud.bySource || {},
+      ratingCounts: cloud.ratingCounts || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+      recent: list.slice(-15).reverse()
+    };
+  }
+};
+window.ChatAnalyticsModule = ChatAnalyticsModule;
 
 /* ─── ChatModule ─── */
 const ChatModule = {
@@ -6066,6 +6283,7 @@ const ChatModule = {
       document.getElementById('chatDock').classList.remove('chat-menu-open');
     });
     document.getElementById('chatSearchHistory').addEventListener('input', e => this.renderHistory(e.target.value));
+    this.bindRatingEvents();
   },
   /** Renderiza preguntas rápidas en barra horizontal */
   renderQuickQuestions() {
@@ -6170,6 +6388,7 @@ const ChatModule = {
     const conv = this.getCurrent();
     const box = document.getElementById('chatMessages');
     if (!conv) { if (box) box.innerHTML = ''; return; }
+    ChatAnalyticsModule.applyPendingRatings(conv);
     box.innerHTML = conv.messages.map(m => this.msgHTML(m)).join('');
     this.bindTopicMenuEvents();
     const mode = scrollMode === 'auto'
@@ -6195,11 +6414,22 @@ const ChatModule = {
     } else {
       bodyContent = formatBotText(m.text);
     }
-    return `<div class="chat-msg-row ${row}"><div class="chat-msg-bubble-wrap"><div class="chat-msg-bubble">
+    let ratingBlock = '';
+    if (m.rated && m.rating) {
+      ratingBlock = `<div class="chat-rating-done">Tu evaluación: ${'★'.repeat(m.rating)}${'☆'.repeat(5 - m.rating)}</div>`;
+    } else if (m.showRating && m.interactionId && !m.ratingDismissed) {
+      ratingBlock = `<div class="chat-rating-prompt">
+        <p>¿Qué tan útil fue esta respuesta?</p>
+        <div class="chat-rating-stars">${[1, 2, 3, 4, 5].map(n => `<button type="button" data-rate="${n}" title="${n} estrella${n > 1 ? 's' : ''}">★</button>`).join('')}</div>
+        <button type="button" class="chat-rating-dismiss" data-dismiss-rating>Omitir</button>
+      </div>`;
+    }
+    const msgAttrs = `data-msg-id="${escapeHtml(m.id || '')}"${m.interactionId ? ` data-interaction-id="${escapeHtml(m.interactionId)}"` : ''}`;
+    return `<div class="chat-msg-row ${row}" ${msgAttrs}><div class="chat-msg-bubble-wrap"><div class="chat-msg-bubble">
       ${!isUser ? `<div class="chat-msg-author">${botName}</div>` : ''}
       <div class="chat-msg-body">${bodyContent}</div>
       ${!isUser && m.confidence != null ? `<div class="chat-confidence${m.confidence < 70 ? ' low' : ''}">Confianza: ${m.confidence}%</div>` : ''}
-      ${actions}<div class="chat-msg-meta"><span class="chat-msg-time">${fmtDate(m.time)}</span></div>
+      ${ratingBlock}${actions}<div class="chat-msg-meta"><span class="chat-msg-time">${fmtDate(m.time)}</span></div>
     </div></div></div>`;
   },
   /** Agrega mensaje del usuario */
@@ -6212,13 +6442,28 @@ const ChatModule = {
   },
   /** Agrega mensaje del bot */
   addBotMessage(text, actions, extra) {
-    const conv = this.getCurrent(); if (!conv) return;
-    const msg = { type:'bot', text, time: Date.now(), actions };
+    const conv = this.getCurrent(); if (!conv) return null;
+    const msg = { id: DatabaseModule.uid('msg'), type:'bot', text, time: Date.now(), actions };
     if (extra?.topicsMenu) msg.topicsMenu = true;
     if (extra?.confidence != null) msg.confidence = extra.confidence;
     conv.messages.push(msg);
     conv.updatedAt = Date.now();
-    DatabaseModule.save(); this.renderMessages('bot-start');
+    if (ChatAnalyticsModule.shouldTrack(extra)) {
+      const entry = ChatAnalyticsModule.log({
+        conversationId: conv.id,
+        messageId: msg.id,
+        userQuery: extra.userQuery,
+        topicTitle: extra.topicTitle || extra.analytics?.topicTitle || '',
+        source: extra.source || extra.analytics?.source || 'unknown',
+        intent: extra.intent || extra.analytics?.intent || 'question',
+        confidence: extra.confidence ?? null
+      });
+      msg.interactionId = entry.id;
+      ChatAnalyticsModule.scheduleRating(msg.id, entry.id, conv.id);
+    }
+    DatabaseModule.save();
+    this.renderMessages('bot-start');
+    return msg;
   },
   /** Agrega mensaje con menú de temas categorizado */
   addTopicsMenuMessage(intro) {
@@ -6258,7 +6503,13 @@ const ChatModule = {
       this.showTyping(true);
       setTimeout(() => {
         this.showTyping(false);
-        this.addBotMessage(GadgetKBModule.formatResponse(entry.response, question || entry.title));
+        this.addBotMessage(GadgetKBModule.formatResponse(entry.response, question || entry.title), undefined, {
+          userQuery: question || entry.title || entry.question,
+          source: 'gadget',
+          topicTitle: entry.title,
+          intent: 'topic_select',
+          confidence: 92
+        });
       }, 650 + Math.random() * 500);
     } else if (question) {
       document.getElementById('chatInput').value = question;
@@ -6312,7 +6563,35 @@ const ChatModule = {
 
     this.addBotMessage(replyText, result.actions, {
       topicsMenu: !!result.topicsMenu,
-      confidence: result.confidence
+      confidence: result.confidence,
+      userQuery: text,
+      source: result.analytics?.source,
+      topicTitle: result.analytics?.topicTitle,
+      intent: result.analytics?.intent,
+      analytics: result.analytics,
+      skipAnalytics: result.analytics?.trackable === false
+    });
+  },
+  /** Enlaza botones de evaluación de respuesta (delegación, una sola vez) */
+  bindRatingEvents() {
+    const box = document.getElementById('chatMessages');
+    if (!box || box.dataset.ratingBound) return;
+    box.dataset.ratingBound = '1';
+    box.addEventListener('click', (e) => {
+      const rateBtn = e.target.closest('[data-rate]');
+      if (rateBtn) {
+        e.preventDefault();
+        const row = rateBtn.closest('[data-msg-id]');
+        if (!row) return;
+        ChatAnalyticsModule.submitRating(row.dataset.msgId, row.dataset.interactionId, rateBtn.dataset.rate);
+        return;
+      }
+      const dismissBtn = e.target.closest('[data-dismiss-rating]');
+      if (dismissBtn) {
+        e.preventDefault();
+        const row = dismissBtn.closest('[data-msg-id]');
+        if (row) ChatAnalyticsModule.dismissRating(row.dataset.msgId);
+      }
     });
   },
   /** Escala a humano desde botón del chat */
@@ -6878,7 +7157,7 @@ const TrainingModule = {
     this.renderTopics();
     toast('Índice inteligente actualizado — ' + count + ' temas activos para Arturito', 'success');
   },
-  /** Renderiza estadísticas del índice */
+  /** Renderiza estadísticas del índice y del chat */
   renderStats() {
     const docs = IDBModule.documentsCache;
     const manual = KnowledgeBaseModule.getEnabled();
@@ -6892,6 +7171,34 @@ const TrainingModule = {
     document.getElementById('statTotalChars').textContent = totalChars > 1000 ? Math.round(totalChars/1000) + 'k' : totalChars;
     const last = docs[0];
     document.getElementById('statLastUpload').textContent = last ? fmtDate(last.createdAt).split(',')[0] : '—';
+    const chatStats = ChatAnalyticsModule.getStats();
+    const statChatInteractions = document.getElementById('statChatInteractions');
+    const statChatRatings = document.getElementById('statChatRatings');
+    const statChatAvgRating = document.getElementById('statChatAvgRating');
+    const statChatWeek = document.getElementById('statChatWeek');
+    if (statChatInteractions) statChatInteractions.textContent = chatStats.totalCloud || chatStats.total;
+    if (statChatRatings) statChatRatings.textContent = chatStats.rated;
+    if (statChatAvgRating) statChatAvgRating.textContent = chatStats.avgRating;
+    if (statChatWeek) statChatWeek.textContent = chatStats.last7;
+    this.renderChatInteractionsTable(chatStats.recent);
+  },
+  renderChatInteractionsTable(recent) {
+    const wrap = document.getElementById('chatInteractionsTableWrap');
+    if (!wrap) return;
+    if (!recent?.length) {
+      wrap.innerHTML = '<p style="font-size:.8rem;color:var(--text-muted)">Sin interacciones registradas aún. Las consultas del chat aparecerán aquí.</p>';
+      return;
+    }
+    const sourceLabel = { gadget: 'Gadget', manual: 'Manual', document: 'Documento', system: 'Sistema', unknown: 'Otro', fallback: 'Sin match' };
+    wrap.innerHTML = `<table class="chat-interactions-table"><thead><tr>
+      <th>Fecha</th><th>Consulta</th><th>Fuente</th><th>Confianza</th><th>Evaluación</th>
+    </tr></thead><tbody>${recent.map(i => `<tr>
+      <td>${fmtDate(i.createdAt).split(',')[0]}</td>
+      <td>${escapeHtml(String(i.userQuery || i.topicTitle || '—').slice(0, 60))}</td>
+      <td>${escapeHtml(sourceLabel[i.source] || i.source || '—')}</td>
+      <td>${i.confidence != null ? i.confidence + '%' : '—'}</td>
+      <td>${i.rating ? '★'.repeat(i.rating) : '—'}</td>
+    </tr>`).join('')}</tbody></table>`;
   },
   /** Renderiza todo al entrar a la vista */
   async render() {
@@ -7073,7 +7380,7 @@ const TrainingModule = {
     ev.preventDefault();
     const editId = document.getElementById('gkbEditId').value;
     const existing = editId ? GadgetKBModule.getById(editId) : null;
-    await GadgetKBModule.saveEntry({
+    const r = await GadgetKBModule.saveEntry({
       id: editId || undefined,
       key: existing?.key || document.getElementById('gkbTitle').value.trim().toLowerCase().replace(/\s+/g, '-').slice(0, 40),
       title: document.getElementById('gkbTitle').value,
@@ -7090,16 +7397,17 @@ const TrainingModule = {
     this.renderStats();
     this.refreshChatTopicOrder();
     if (document.body.classList.contains('mode-client') && ChatModule.getCurrent()) ChatModule.renderMessages();
-    toast('Tema Gadget guardado — sincronizado con la base manual', 'success');
+    if (r?.cloud) toast('Tema Gadget guardado y sincronizado en la nube', 'success');
   },
   async removeGadgetKB(id) {
     if (!confirm('¿Eliminar este tema de la base Gadget? También desaparecerá de la base manual.')) return;
-    await GadgetKBModule.deleteEntry(id);
+    const r = await GadgetKBModule.deleteEntry(id);
     this.renderGadgetKB();
     this.renderManual();
     this.renderStats();
+    this.refreshChatTopicOrder();
     if (document.body.classList.contains('mode-client') && ChatModule.getCurrent()) ChatModule.renderMessages();
-    toast('Tema eliminado', 'info');
+    if (r?.cloud) toast('Tema eliminado y sincronizado en la nube', 'success');
   },
   /** Renderiza temas agrupados por documento con análisis IA */
   renderTopics() {
@@ -7448,7 +7756,7 @@ const TrainingModule = {
     document.getElementById('kCategoria').value = k.categoria||'';
     openModal('modalKnowledge');
   },
-  saveManual(e) {
+  async saveManual(e) {
     e.preventDefault();
     const editId = document.getElementById('kEditId').value;
     const data = { pregunta: document.getElementById('kPregunta').value, respuesta: document.getElementById('kRespuesta').value,
@@ -7460,24 +7768,28 @@ const TrainingModule = {
       const kView = database.knowledge.find(x => x.id === editId);
       if (kView?.origin === 'gadget' && kView.gadgetId) {
         const gIdx = database.gadgetKB.findIndex(g => g.id === kView.gadgetId);
-        if (gIdx >= 0) {
-          const catKey = Object.entries(GadgetKBModule.getCategories()).find(([, v]) => v.name === data.categoria)?.[0];
-          database.gadgetKB[gIdx] = {
-            ...database.gadgetKB[gIdx],
-            title: data.pregunta,
-            response: data.respuesta,
-            keywords: String(data.keywords || '').split(',').map(k => k.trim()).filter(Boolean),
-            category: catKey || database.gadgetKB[gIdx].category,
-            updatedAt: Date.now()
-          };
+        if (gIdx < 0) {
+          toast('No se encontró el tema Gadget vinculado. Recarga la página e intenta de nuevo.', 'error');
+          return;
         }
+        const catKey = Object.entries(GadgetKBModule.getCategories()).find(([, v]) => v.name === data.categoria)?.[0];
+        database.gadgetKB[gIdx] = {
+          ...database.gadgetKB[gIdx],
+          title: data.pregunta,
+          response: data.respuesta,
+          keywords: String(data.keywords || '').split(',').map(k => k.trim()).filter(Boolean),
+          category: catKey || database.gadgetKB[gIdx].category,
+          updatedAt: Date.now()
+        };
         KnowledgeBaseModule.syncFromGadget();
-        const gadgetId = kView.gadgetId || database.gadgetKB[gIdx]?.id;
-        DatabaseModule.save('gadgetKB', { gadget: { changedIds: gadgetId ? [gadgetId] : [] } }).then((r) => {
-          closeModal('modalKnowledge'); this.renderManual(); this.renderGadgetKB(); this.renderStats();
-          void RAGModule.rebuildIndex();
-          toast(r?.cloud ? 'Tema actualizado y respaldado en la nube' : 'Guardado local. Se sincronizará al reconectar.', r?.cloud ? 'success' : 'info');
-        });
+        const r = await DatabaseModule.save('gadgetKB', { gadget: { changedIds: [kView.gadgetId] } });
+        closeModal('modalKnowledge');
+        this.renderManual();
+        this.renderGadgetKB();
+        this.renderStats();
+        this.refreshChatTopicOrder();
+        void RAGModule.rebuildIndex();
+        if (r?.cloud) toast('Tema actualizado y sincronizado en la nube', 'success');
         return;
       }
       const idx = database.manualKnowledge.findIndex(k => k.id === editId);
@@ -7489,13 +7801,14 @@ const TrainingModule = {
     }
     KnowledgeBaseModule.syncFromGadget();
     const manualId = editId || database.manualKnowledge[0]?.id;
-    DatabaseModule.save('knowledge', { knowledge: { changedIds: manualId ? [manualId] : [] } }).then((r) => {
-      closeModal('modalKnowledge'); this.renderManual(); this.renderStats();
-      void RAGModule.rebuildIndex();
-      toast(r?.cloud ? 'Base manual guardada en la nube' : 'Guardado local. Se sincronizará al reconectar.', r?.cloud ? 'success' : 'info');
-    });
+    const r = await DatabaseModule.save('knowledge', { knowledge: { changedIds: manualId ? [manualId] : [] } });
+    closeModal('modalKnowledge');
+    this.renderManual();
+    this.renderStats();
+    void RAGModule.rebuildIndex();
+    if (r?.cloud) toast('Base manual guardada en la nube', 'success');
   },
-  removeManual(id) {
+  async removeManual(id) {
     const entry = (database.manualKnowledge || database.knowledge).find(k => k.id === id);
     const msg = entry?.origin === 'gadget'
       ? '¿Eliminar este tema? También se quitará de la Base Gadget.'
@@ -7505,20 +7818,23 @@ const TrainingModule = {
       database.gadgetKB = (database.gadgetKB || []).filter(g => g.id !== entry.gadgetId);
       database.manualKnowledge = (database.manualKnowledge || database.knowledge.filter(k => k.origin !== 'gadget')).filter(k => k.id !== id);
       KnowledgeBaseModule.syncFromGadget();
-      DatabaseModule.save('gadgetKB', { gadget: { deletedIds: [entry.gadgetId] } }).then(() => {
-        this.renderManual(); this.renderGadgetKB(); this.renderStats();
-        void RAGModule.rebuildIndex();
-        toast('Tema eliminado de la nube', 'info');
-      });
+      const r = await DatabaseModule.save('gadgetKB', { gadget: { deletedIds: [entry.gadgetId] } });
+      this.renderManual();
+      this.renderGadgetKB();
+      this.renderStats();
+      this.refreshChatTopicOrder();
+      void RAGModule.rebuildIndex();
+      if (r?.cloud) toast('Tema eliminado y sincronizado en la nube', 'success');
       return;
     }
     database.manualKnowledge = (database.manualKnowledge || database.knowledge.filter(k => k.origin !== 'gadget')).filter(k => k.id !== id);
     KnowledgeBaseModule.syncFromGadget();
-    DatabaseModule.save('knowledge', { knowledge: { deletedIds: [id] } }).then(() => {
-      this.renderManual(); this.renderGadgetKB(); this.renderStats();
-      void RAGModule.rebuildIndex();
-      toast('Entrada eliminada de la nube', 'info');
-    });
+    const r = await DatabaseModule.save('knowledge', { knowledge: { deletedIds: [id] } });
+    this.renderManual();
+    this.renderGadgetKB();
+    this.renderStats();
+    void RAGModule.rebuildIndex();
+    if (r?.cloud) toast('Entrada eliminada y sincronizada en la nube', 'success');
   },
   exportManual() {
     KnowledgeBaseModule.syncFromGadget();
@@ -7680,6 +7996,15 @@ const ReportModule = {
       data: { labels: conf.labels, datasets: [{ label: 'Mensajes', data: conf.values, backgroundColor: ['#10b981','#f59e0b','#ef4444'] }] },
       options: { ...opts, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
     });
+    const ratings = this.chatRatingData();
+    const ratingCanvas = document.getElementById('chartChatRatings');
+    if (ratingCanvas) {
+      this._charts.chatRatings = new Chart(ratingCanvas, {
+        type: 'bar',
+        data: { labels: ratings.labels, datasets: [{ label: 'Evaluaciones', data: ratings.values, backgroundColor: '#f59e0b' }] },
+        options: { ...opts, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+      });
+    }
     const usage = this.platformUsageData();
     this._charts.usage = new Chart(document.getElementById('chartUsage'), {
       type: 'radar',
@@ -7692,25 +8017,41 @@ const ReportModule = {
   },
   chatbotConfidenceData() {
     let high = 0, mid = 0, low = 0;
-    (database.conversations || []).forEach(c => {
-      (c.messages || []).filter(m => m.type === 'bot' && m.confidence != null).forEach(m => {
-        if (m.confidence >= 70) high++;
-        else if (m.confidence >= 40) mid++;
-        else low++;
-      });
+    (database.chatInteractions || []).forEach(i => {
+      if (i.confidence == null) return;
+      if (i.confidence >= 70) high++;
+      else if (i.confidence >= 40) mid++;
+      else low++;
     });
+    if (!high && !mid && !low) {
+      (database.conversations || []).forEach(c => {
+        (c.messages || []).filter(m => m.type === 'bot' && m.confidence != null).forEach(m => {
+          if (m.confidence >= 70) high++;
+          else if (m.confidence >= 40) mid++;
+          else low++;
+        });
+      });
+    }
     return { labels: ['Alta (≥70%)', 'Media (40-69%)', 'Baja (<40%)'], values: [high, mid, low] };
+  },
+  chatRatingData() {
+    const counts = ChatAnalyticsModule.getStats().ratingCounts || {};
+    return {
+      labels: ['1 ★', '2 ★', '3 ★', '4 ★', '5 ★'],
+      values: [1, 2, 3, 4, 5].map(n => counts[n] || 0)
+    };
   },
   platformUsageData() {
     const docs = (typeof IDBModule !== 'undefined' && IDBModule.documentsCache) ? IDBModule.documentsCache.length : 0;
+    const chatTotal = ChatAnalyticsModule.getStats().totalCloud || database.chatInteractions?.length || 0;
     return {
-      labels: ['Tickets', 'Usuarios', 'Conversaciones', 'Documentos', 'FAQ'],
+      labels: ['Tickets', 'Usuarios', 'Conversaciones', 'Interacciones chat', 'Documentos'],
       values: [
         database.tickets.length,
         database.users.length,
         database.conversations.length,
-        docs,
-        (database.knowledge || []).length
+        chatTotal,
+        docs
       ]
     };
   },
@@ -7886,10 +8227,12 @@ const App = {
     }
     if (type === 'settings' && this.mode === 'admin') {
       TrainingModule.renderChatContentForm?.();
+      TrainingModule.renderStats?.();
     }
     if (type === 'gadgetKB' || type === 'knowledge') {
       KnowledgeBaseModule.syncFromGadget();
       await RAGModule.rebuildIndex();
+      TrainingModule.refreshChatTopicOrder?.();
       if (this.mode === 'admin') {
         TrainingModule.renderGadgetKB?.();
         TrainingModule.renderManual?.();
