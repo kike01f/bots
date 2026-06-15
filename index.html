@@ -686,6 +686,13 @@ body.mode-client #adminApp{display:none!important}
 .kb-gadget-order-col button:disabled{opacity:.35;cursor:not-allowed}
 .kb-gadget-cat-list{min-height:8px}
 .kb-sort-list{display:flex;flex-direction:column;gap:.45rem;margin:.75rem 0 1rem}
+.gadget-cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr));gap:.55rem;margin-bottom:1rem}
+.gadget-cat-chip{display:flex;align-items:center;gap:.55rem;padding:.65rem .75rem;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card)}
+.gadget-cat-chip-icon{font-size:1.35rem;line-height:1;flex-shrink:0;width:1.75rem;text-align:center}
+.gadget-cat-chip-body{flex:1;min-width:0}
+.gadget-cat-chip-body strong{display:block;font-size:.85rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gadget-cat-chip-meta{display:block;font-size:.68rem;color:var(--text-muted);margin-top:.1rem}
+.gadget-cat-chip-actions{display:flex;gap:.25rem;flex-shrink:0}
 .kb-sort-item{display:flex;align-items:center;gap:.5rem;padding:.55rem .65rem;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card);cursor:grab;user-select:none}
 .kb-sort-item.dragging{opacity:.5}
 .kb-sort-item.drag-over{border-color:var(--primary)}
@@ -962,6 +969,16 @@ body.mode-client #adminApp{display:none!important}
               </div>
             </div>
             <p style="font-size:.82rem;color:var(--text-muted);margin:-.5rem 0 1rem">Temas del reglamento y servicios del edificio. <strong>Arrastra</strong> o usa ↑↓ para definir el orden en el menú del chat. Se sincronizan con la base manual.</p>
+            <div class="gadget-categories-bar" style="margin-bottom:1rem;padding:1rem;border:1px dashed var(--border);border-radius:var(--radius-sm);background:color-mix(in srgb,var(--primary) 4%,var(--bg-card))">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;margin-bottom:.65rem;flex-wrap:wrap">
+                <div>
+                  <div style="font-weight:700;font-size:.9rem">Categorías del menú Gadget</div>
+                  <p style="font-size:.75rem;color:var(--text-muted);margin:.2rem 0 0">Nombre e icono visibles en el chat. Se sincronizan en la nube.</p>
+                </div>
+                <button type="button" class="btn btn-primary btn-sm" id="btnNewGadgetCategory">+ Nueva categoría</button>
+              </div>
+              <div id="gadgetCategoriesList"></div>
+            </div>
             <div class="toolbar">
               <div class="search-box"><input type="text" id="gadgetKBSearch" placeholder="Buscar temas, palabras clave..."></div>
               <select id="gadgetKBFilterCat" style="min-width:200px"><option value="">Todas las categorías</option></select>
@@ -1031,7 +1048,7 @@ body.mode-client #adminApp{display:none!important}
               <div class="form-group full"><label>Preguntas rápidas <span style="font-weight:400;color:var(--text-muted)">(arrastra para reordenar la barra del chat)</span></label><div id="chatQuickQuestionsSort" class="kb-sort-list"></div><textarea id="ccQuickQuestions" rows="3" style="margin-top:.5rem;font-size:.78rem" placeholder="También puedes editar aquí, una por línea"></textarea></div>
               <div class="form-group full" style="margin-top:.5rem;padding-top:1rem;border-top:1px dashed var(--border)">
                 <div style="font-weight:700;margin-bottom:.5rem;font-size:.92rem">Menú de temas del chat</div>
-                <p style="font-size:.8rem;color:var(--text-muted);margin:0 0 .75rem">Orden de <strong>categorías</strong> (arrastra). El orden de cada tema se define en la pestaña <strong>Base Gadget</strong>.</p>
+                <p style="font-size:.8rem;color:var(--text-muted);margin:0 0 .75rem">Orden de <strong>categorías</strong> (arrastra). Para crear o editar nombre e icono, usa <strong>Base Gadget → Categorías del menú</strong>.</p>
                 <label style="font-size:.8rem;font-weight:500;color:var(--text-muted);display:block;margin-bottom:.35rem">Orden de categorías en el chat</label>
                 <div id="chatCategoryOrderList" class="kb-sort-list"></div>
               </div>
@@ -1255,6 +1272,20 @@ body.mode-client #adminApp{display:none!important}
     <div class="form-group full" style="display:flex;gap:.5rem;justify-content:flex-end">
       <button type="button" class="btn btn-secondary" data-close="modalGadgetKB">Cancelar</button>
       <button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar tema</button>
+    </div>
+  </form>
+</div></div>
+
+<div class="modal-overlay" id="modalGadgetCategory"><div class="modal" style="max-width:480px">
+  <div class="modal-header"><h3 id="gadgetCategoryModalTitle">Nueva categoría</h3><button class="modal-close" data-close="modalGadgetCategory">×</button></div>
+  <form id="gadgetCategoryForm" class="form-grid">
+    <input type="hidden" id="gcEditKey">
+    <div class="form-group full"><label>Nombre visible en el menú *</label><input type="text" id="gcName" required placeholder="Ej: Espacios Comunes" maxlength="80"></div>
+    <div class="form-group"><label>Icono</label><input type="text" id="gcIcon" placeholder="Ej: 🏛️" maxlength="8"></div>
+    <div class="form-group" id="gcKeyWrap" style="display:none"><label>Clave interna</label><input type="text" id="gcKeyPreview" readonly tabindex="-1" style="opacity:.75"></div>
+    <div class="form-group full" style="display:flex;gap:.5rem;justify-content:flex-end">
+      <button type="button" class="btn btn-secondary" data-close="modalGadgetCategory">Cancelar</button>
+      <button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar categoría</button>
     </div>
   </form>
 </div></div>
@@ -5297,6 +5328,68 @@ const GadgetKBModule = {
     return DatabaseModule.save('settings');
   },
 
+  slugCategoryKey(text) {
+    return String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'categoria';
+  },
+
+  uniqueCategoryKey(base) {
+    const cats = this.getCategories();
+    let key = base || 'categoria';
+    let n = 2;
+    while (cats[key]) { key = `${base}-${n++}`; }
+    return key;
+  },
+
+  ensureCategoriesStore() {
+    if (!database.settings.gadgetCategories || !Object.keys(database.settings.gadgetCategories).length) {
+      database.settings.gadgetCategories = typeof ARTURITO_GADGET_CATEGORIES !== 'undefined'
+        ? JSON.parse(JSON.stringify(ARTURITO_GADGET_CATEGORIES))
+        : {};
+    }
+    if (!database.settings.gadgetCategoryOrder?.length) {
+      database.settings.gadgetCategoryOrder = Object.keys(database.settings.gadgetCategories);
+    }
+  },
+
+  async saveCategory({ editKey, name, icon }) {
+    this.ensureCategoriesStore();
+    const trimmedName = String(name || '').trim();
+    const trimmedIcon = String(icon || '').trim();
+    if (!trimmedName) return { ok: false, error: 'El nombre es obligatorio' };
+    let key = editKey;
+    if (!key) {
+      key = this.uniqueCategoryKey(this.slugCategoryKey(trimmedName));
+    }
+    if (!database.settings.gadgetCategories[key]) {
+      const order = this.getCategoryKeys();
+      if (!order.includes(key)) database.settings.gadgetCategoryOrder = [...order, key];
+    }
+    database.settings.gadgetCategories[key] = { name: trimmedName, icon: trimmedIcon };
+    database.settings.updatedAt = Date.now();
+    const r = await DatabaseModule.save('settings');
+    return { ok: true, key, cloud: r?.cloud };
+  },
+
+  async deleteCategory(key) {
+    this.ensureCategoriesStore();
+    const keys = this.getCategoryKeys();
+    if (keys.length <= 1) return { ok: false, error: 'Debe quedar al menos una categoría' };
+    if (!database.settings.gadgetCategories[key]) return { ok: false, error: 'Categoría no encontrada' };
+    const affected = (database.gadgetKB || []).filter(e => e.category === key);
+    const fallback = keys.find(k => k !== key);
+    if (affected.length && fallback) {
+      affected.forEach(e => { e.category = fallback; });
+      KnowledgeBaseModule.syncFromGadget();
+      await DatabaseModule.save('gadgetKB', { gadget: { changedIds: affected.map(e => e.id) } });
+    }
+    delete database.settings.gadgetCategories[key];
+    database.settings.gadgetCategoryOrder = keys.filter(k => k !== key);
+    database.settings.updatedAt = Date.now();
+    const r = await DatabaseModule.save('settings');
+    return { ok: true, cloud: r?.cloud, movedTopics: affected.length };
+  },
+
   async setQuickQuestionsOrder(questions) {
     database.settings.quickQuestions = questions.filter(q => String(q).trim());
     database.settings.updatedAt = Date.now();
@@ -7147,9 +7240,9 @@ const TrainingModule = {
   },
   /** Inicializa editor Base Gadget */
   initGadgetKB() {
-    const cats = GadgetKBModule.getCategories();
-    document.getElementById('gkbCategory').innerHTML = Object.entries(cats).map(([k, v]) =>
-      `<option value="${k}">${v.name}</option>`).join('');
+    this.refreshCategorySelects();
+    document.getElementById('gadgetCategoryForm').addEventListener('submit', e => this.saveGadgetCategory(e));
+    document.getElementById('btnNewGadgetCategory').addEventListener('click', () => this.openCreateGadgetCategory());
     document.getElementById('gadgetKBForm').addEventListener('submit', e => this.saveGadgetKB(e));
     document.getElementById('gadgetKBSearch').addEventListener('input', () => this.renderGadgetKB());
     document.getElementById('gadgetKBFilterCat').addEventListener('change', () => this.renderGadgetKB());
@@ -7177,6 +7270,115 @@ const TrainingModule = {
       if (document.body.classList.contains('mode-client') && ChatModule.getCurrent()) ChatModule.renderMessages();
       toast('Base Gadget restaurada y sincronizada con base manual', 'success');
     });
+    this.renderGadgetCategories();
+  },
+  refreshCategorySelects(selectedKey) {
+    GadgetKBModule.ensureCategoriesStore();
+    const cats = GadgetKBModule.getCategories();
+    const keys = GadgetKBModule.getCategoryKeys();
+    const opts = keys.map(k => {
+      const c = cats[k] || { name: k, icon: '' };
+      return `<option value="${escapeHtml(k)}">${escapeHtml(c.name)}</option>`;
+    }).join('');
+    const gkb = document.getElementById('gkbCategory');
+    if (gkb) {
+      gkb.innerHTML = opts;
+      if (selectedKey && keys.includes(selectedKey)) gkb.value = selectedKey;
+    }
+    const filterEl = document.getElementById('gadgetKBFilterCat');
+    if (filterEl) {
+      const cur = filterEl.value;
+      filterEl.innerHTML = '<option value="">Todas las categorías</option>' + opts;
+      filterEl.value = keys.includes(cur) ? cur : '';
+    }
+  },
+  renderGadgetCategories() {
+    const el = document.getElementById('gadgetCategoriesList');
+    if (!el) return;
+    GadgetKBModule.ensureCategoriesStore();
+    const cats = GadgetKBModule.getCategories();
+    const keys = GadgetKBModule.getCategoryKeys();
+    const counts = {};
+    (database.gadgetKB || []).forEach(e => { counts[e.category] = (counts[e.category] || 0) + 1; });
+    if (!keys.length) {
+      el.innerHTML = '<p style="font-size:.8rem;color:var(--text-muted)">Sin categorías. Crea una para organizar el menú del chat.</p>';
+      return;
+    }
+    el.innerHTML = `<div class="gadget-cat-grid">${keys.map(k => {
+      const c = cats[k] || { name: k, icon: '' };
+      return `<div class="gadget-cat-chip">
+        <span class="gadget-cat-chip-icon">${escapeHtml(c.icon || '📁')}</span>
+        <div class="gadget-cat-chip-body">
+          <strong>${escapeHtml(c.name)}</strong>
+          <span class="gadget-cat-chip-meta">${counts[k] || 0} tema(s) · clave: ${escapeHtml(k)}</span>
+        </div>
+        <div class="gadget-cat-chip-actions">
+          ${actionBtn('edit', `TrainingModule.openEditGadgetCategory('${k}')`, 'Editar')}
+          ${keys.length > 1 ? actionBtn('trash', `TrainingModule.removeGadgetCategory('${k}')`, 'Eliminar', true) : ''}
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+  },
+  openCreateGadgetCategory() {
+    document.getElementById('gadgetCategoryModalTitle').textContent = 'Nueva categoría del menú';
+    document.getElementById('gcEditKey').value = '';
+    document.getElementById('gcName').value = '';
+    document.getElementById('gcIcon').value = '';
+    document.getElementById('gcKeyWrap').style.display = 'none';
+    openModal('modalGadgetCategory');
+    document.getElementById('gcName').focus();
+  },
+  openEditGadgetCategory(key) {
+    const c = GadgetKBModule.getCategories()[key];
+    if (!c) return;
+    document.getElementById('gadgetCategoryModalTitle').textContent = 'Editar categoría';
+    document.getElementById('gcEditKey').value = key;
+    document.getElementById('gcName').value = c.name || '';
+    document.getElementById('gcIcon').value = c.icon || '';
+    document.getElementById('gcKeyPreview').value = key;
+    document.getElementById('gcKeyWrap').style.display = '';
+    openModal('modalGadgetCategory');
+    document.getElementById('gcName').focus();
+  },
+  async saveGadgetCategory(e) {
+    e.preventDefault();
+    const editKey = document.getElementById('gcEditKey').value.trim();
+    const r = await GadgetKBModule.saveCategory({
+      editKey: editKey || undefined,
+      name: document.getElementById('gcName').value,
+      icon: document.getElementById('gcIcon').value
+    });
+    if (!r?.ok) {
+      toast(r?.error || 'No se pudo guardar la categoría', 'error');
+      return;
+    }
+    closeModal('modalGadgetCategory');
+    this.refreshCategorySelects(r.key);
+    this.renderGadgetCategories();
+    this.renderGadgetKB();
+    this.renderCategoryOrderList();
+    this.refreshChatTopicOrder();
+    toast(r.cloud ? 'Categoría guardada y sincronizada en la nube' : 'Categoría guardada localmente', r.cloud ? 'success' : 'warning');
+  },
+  async removeGadgetCategory(key) {
+    const c = GadgetKBModule.getCategories()[key];
+    const count = (database.gadgetKB || []).filter(e => e.category === key).length;
+    const msg = count
+      ? `¿Eliminar «${c?.name || key}»? ${count} tema(s) pasarán a otra categoría.`
+      : `¿Eliminar la categoría «${c?.name || key}»?`;
+    if (!confirm(msg)) return;
+    const r = await GadgetKBModule.deleteCategory(key);
+    if (!r?.ok) {
+      toast(r?.error || 'No se pudo eliminar', 'error');
+      return;
+    }
+    this.refreshCategorySelects();
+    this.renderGadgetCategories();
+    this.renderGadgetKB();
+    this.renderCategoryOrderList();
+    this.refreshChatTopicOrder();
+    const note = r.movedTopics ? ` (${r.movedTopics} tema(s) reasignados)` : '';
+    toast((r.cloud ? 'Categoría eliminada de la nube' : 'Categoría eliminada localmente') + note, 'success');
   },
   /** Inicializa pestañas de entrenamiento */
   initTabs() {
@@ -7374,16 +7576,11 @@ const TrainingModule = {
   },
   /** Renderiza base de conocimiento Gadget agrupada por categoría */
   renderGadgetKB() {
+    this.renderGadgetCategories();
+    this.refreshCategorySelects();
     const q = (document.getElementById('gadgetKBSearch')?.value || '').toLowerCase();
     const catFilter = document.getElementById('gadgetKBFilterCat')?.value || '';
     const cats = GadgetKBModule.getCategories();
-    const filterEl = document.getElementById('gadgetKBFilterCat');
-    if (filterEl) {
-      const cur = filterEl.value;
-      filterEl.innerHTML = '<option value="">Todas las categorías</option>' +
-        Object.entries(cats).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join('');
-      filterEl.value = cur || catFilter;
-    }
     let entries = GadgetKBModule.getEntries();
     if (catFilter) entries = entries.filter(e => e.category === catFilter);
     if (q) entries = entries.filter(e =>
@@ -7400,7 +7597,10 @@ const TrainingModule = {
       if (!groups[e.category]) groups[e.category] = [];
       groups[e.category].push(e);
     });
-    container.innerHTML = Object.entries(groups).map(([catKey, items]) => {
+    const groupKeys = catFilter ? [catFilter] : GadgetKBModule.getCategoryKeys().filter(k => groups[k]?.length);
+    container.innerHTML = groupKeys.map((catKey) => {
+      const items = groups[catKey];
+      if (!items?.length) return '';
       const cat = cats[catKey] || { name: catKey };
       const sortedItems = items.slice().sort((a, b) => (a.order || 0) - (b.order || 0));
       return `<div class="doc-group-header"><span>${escapeHtml(cat.name)}</span><span style="font-size:.72rem;color:var(--text-muted)">${sortedItems.length} tema(s) · arrastra para ordenar</span></div>` +
@@ -7425,7 +7625,7 @@ const TrainingModule = {
           </div>
         </div>`).join('') +
         `</div>`;
-    }).join('');
+    }).filter(Boolean).join('');
     this.bindGadgetKBReorder();
   },
   async moveGadgetTopic(id, dir) {
@@ -8396,6 +8596,9 @@ const App = {
     if (type === 'settings' && this.mode === 'admin') {
       TrainingModule.renderChatContentForm?.();
       TrainingModule.renderStats?.();
+      TrainingModule.renderGadgetCategories?.();
+      TrainingModule.refreshCategorySelects?.();
+      TrainingModule.renderGadgetKB?.();
     }
     if (type === 'analytics') {
       if (this.mode === 'admin') {
