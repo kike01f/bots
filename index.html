@@ -1640,7 +1640,7 @@ const ARTURITO_GADGET_KB_SEED = [
     storageBucket: 'chatbots-hipodromo.firebasestorage.app',
     messagingSenderId: '138621852452',
     appId: '1:138621852452:web:43ee805662e0d39bf331b1',
-    condominioId: 'entre-cerros'
+    condominioId: 'hipodromo'
   };
 
   if (!global.__ARTURITO_FIREBASE_CONFIG__) {
@@ -3065,7 +3065,7 @@ const ARTURITO_GADGET_KB_SEED = [
   <div class="client-portal-bg" aria-hidden="true"></div>
   <div class="client-hero">
     <div class="client-arturito-mascot" id="clientArturitoMascot" aria-hidden="true"></div>
-    <h1 id="clientBuildingName">Edificio Entre Cerros</h1>
+    <h1 id="clientBuildingName">Edificio Hipódromo</h1>
     <p class="client-tagline" id="clientTagline">Tu asistente virtual disponible 24/7</p>
     <p class="client-hint" id="clientHint">Consulta horarios, gastos comunes, reservas o crea solicitudes. Haz clic en <strong>Arturito</strong> en la esquina inferior derecha.</p>
   </div>
@@ -3085,7 +3085,7 @@ const ARTURITO_GADGET_KB_SEED = [
         <div class="chat-header-main">
           <div class="arturito-gadget-avatar" id="chatAvatar"></div>
           <div class="chat-header-text">
-            <div class="chat-title" id="chatHeaderBuilding">Edificio Entre Cerros</div>
+            <div class="chat-title" id="chatHeaderBuilding">Edificio Hipódromo</div>
             <div class="chat-tagline" id="chatBotTagline">Arturito — Tu conserje virtual</div>
             <div class="chat-status" id="chatSub"><span class="chat-status-dot" aria-hidden="true"></span><span id="chatStatusText">En línea</span></div>
           </div>
@@ -3407,7 +3407,7 @@ const ARTURITO_GADGET_KB_SEED = [
               <div class="form-group"><label>Storage Bucket</label><input type="text" id="fbStorageBucket" value="chatbots-hipodromo.firebasestorage.app"></div>
               <div class="form-group"><label>Messaging Sender ID</label><input type="text" id="fbMessagingSenderId" value="138621852452"></div>
               <div class="form-group"><label>App ID</label><input type="text" id="fbAppId" value="1:138621852452:web:43ee805662e0d39bf331b1"></div>
-              <div class="form-group full"><label>ID Condominio (multi-tenant)</label><input type="text" id="fbCondominioId" value="entre-cerros"></div>
+              <div class="form-group full"><label>ID Condominio (multi-tenant)</label><input type="text" id="fbCondominioId" value="hipodromo"></div>
               <div class="form-group full" style="display:flex;gap:.5rem;flex-wrap:wrap">
                 <button type="button" class="btn btn-secondary btn-sm" id="btnTestFirebase">Probar conexión</button>
                 <button type="submit" class="btn btn-primary btn-sm">Guardar y conectar</button>
@@ -3787,7 +3787,7 @@ const DatabaseModule = {
       gadgetKB: [],
       conversations: [],
       settings: {
-        buildingName: 'Edificio Entre Cerros',
+        buildingName: 'Edificio Hipódromo',
         logo: '',
         primaryColor: '#0d9488',
         secondaryColor: '#6366f1',
@@ -3834,7 +3834,7 @@ const DatabaseModule = {
   ensureDefaults() {
     if (!database.settings) database.settings = {};
     const defaults = {
-      buildingName:'Edificio Entre Cerros', logo:'', primaryColor:'#0d9488', secondaryColor:'#6366f1',
+      buildingName:'Edificio Hipódromo', logo:'', primaryColor:'#0d9488', secondaryColor:'#6366f1',
       botName:'Arturito', welcomeMessage:'¡Hola! Soy Arturito, tu asistente virtual.',
       portalTagline:'Tu asistente Arturito disponible 24/7',
       portalHint:'Consulta horarios, gastos comunes, reservas o crea solicitudes.\n\nHaz clic en **Arturito** en la esquina inferior derecha.',
