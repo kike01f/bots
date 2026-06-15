@@ -2155,6 +2155,7 @@ const ARTURITO_GADGET_KB_SEED = [
   const FIREBASE_CONFIG_KEY = 'arturito_firebase_config';
   const CLOUD_SYNC_KEY = 'arturito_cloud_sync_v2';
   const PENDING_SETTINGS_KEY = 'arturito_pending_settings_v1';
+  const PENDING_CLOUD_SYNC_KEY = 'arturito_pending_cloud_sync_v1';
   const LOCAL_DB_KEY = 'arturito_ai_database';
   const FIREBASE_SDK = '10.14.1';
 
@@ -2977,6 +2978,25 @@ const ARTURITO_GADGET_KB_SEED = [
       }
     }
 
+    /** Borra documentos concretos (rápido, sin escanear toda la colección) */
+    async deleteCollectionDocs(collection, ids) {
+      if (!this.fb.isEnabled() || !ids?.length) return;
+      const { writeBatch, deleteDoc, doc } = this.fb._modules;
+      const cid = this._cid();
+      const unique = [...new Set(ids.filter(Boolean))];
+      if (unique.length === 1) {
+        await deleteDoc(doc(this.fb.db, `condominios/${cid}/${collection}`, unique[0]));
+        return;
+      }
+      for (let i = 0; i < unique.length; i += 400) {
+        const batch = writeBatch(this.fb.db);
+        unique.slice(i, i + 400).forEach((id) => {
+          batch.delete(doc(this.fb.db, `condominios/${cid}/${collection}`, id));
+        });
+        await batch.commit();
+      }
+    }
+
     async getCloudCounts() {
       const { getDocs } = this.fb._modules;
       const [gadget, manual] = await Promise.all([
@@ -3151,23 +3171,71 @@ const ARTURITO_GADGET_KB_SEED = [
       }
     }
 
-    async pushGadgetKB(entries) {
-      await this.syncCollectionReplace(
-        'gadget_kb',
-        entries || [],
-        (e) => ({ ...e, updatedAt: Date.now() }),
-        (e) => e.id || e.key
-      );
+    /**
+     * Sube temas Gadget a Firestore.
+     * Por defecto: upsert rápido (1 batch). Opciones:
+     * - changedIds: solo los documentos editados
+     * - deletedIds: borrar sin reemplazar toda la colección
+     * - fullSync: reemplazo completo (importación / migración)
+     */
+    async pushGadgetKB(entries, options = {}) {
+      if (!this.fb.isEnabled()) return;
+      const list = entries || [];
+      if (options.deletedIds?.length) {
+        await this.deleteCollectionDocs('gadget_kb', options.deletedIds);
+      }
+      if (options.fullSync) {
+        await this.syncCollectionReplace(
+          'gadget_kb',
+          list,
+          (e) => ({ ...e, updatedAt: Date.now() }),
+          (e) => e.id || e.key
+        );
+        this._cloudKBActive = true;
+        return;
+      }
+      const toWrite = options.changedIds?.length
+        ? list.filter((e) => options.changedIds.includes(e.id))
+        : list;
+      if (toWrite.length) {
+        await this.batchWrite(
+          'gadget_kb',
+          toWrite,
+          (e) => ({ ...e, updatedAt: Date.now() }),
+          (e) => e.id || e.key
+        );
+      }
+      this._cloudKBActive = true;
     }
 
-    async pushManualKnowledge(knowledgeArr) {
+    async pushManualKnowledge(knowledgeArr, options = {}) {
+      if (!this.fb.isEnabled()) return;
       const manual = (knowledgeArr || []).filter((k) => k.origin !== 'gadget');
-      await this.syncCollectionReplace(
-        'knowledge_base',
-        manual,
-        (k) => this.mapManualToCloud(k),
-        (k) => k.id
-      );
+      if (options.deletedIds?.length) {
+        await this.deleteCollectionDocs('knowledge_base', options.deletedIds);
+      }
+      if (options.fullSync) {
+        await this.syncCollectionReplace(
+          'knowledge_base',
+          manual,
+          (k) => this.mapManualToCloud(k),
+          (k) => k.id
+        );
+        this._cloudKBActive = true;
+        return;
+      }
+      const toWrite = options.changedIds?.length
+        ? manual.filter((k) => options.changedIds.includes(k.id))
+        : manual;
+      if (toWrite.length) {
+        await this.batchWrite(
+          'knowledge_base',
+          toWrite,
+          (k) => this.mapManualToCloud(k),
+          (k) => k.id
+        );
+      }
+      this._cloudKBActive = true;
     }
 
     async migrateTrainingDocuments(documents) {
@@ -3190,8 +3258,8 @@ const ARTURITO_GADGET_KB_SEED = [
         database.manualKnowledge = (database.knowledge || []).filter((k) => k.origin !== 'gadget');
       }
 
-      await this.pushGadgetKB(database.gadgetKB || []);
-      await this.pushManualKnowledge(database.manualKnowledge || []);
+      await this.pushGadgetKB(database.gadgetKB || [], { fullSync: true });
+      await this.pushManualKnowledge(database.manualKnowledge || [], { fullSync: true });
 
       if (this.fb.auth?.currentUser) {
         await this.batchWrite('tickets', (database.tickets || []).slice(0, 500), (t) => this.tickets.mapFromLocal(t), (t) => t.id);
@@ -3329,53 +3397,100 @@ const ARTURITO_GADGET_KB_SEED = [
       return this.fb.isEnabled();
     }
 
-    /** Guarda siempre en localStorage y replica a Firestore según scope */
-    async persist(database, scope = 'full') {
+    _enqueuePending(scope, options) {
+      try {
+        const queue = JSON.parse(localStorage.getItem(PENDING_CLOUD_SYNC_KEY) || '[]');
+        queue.push({ scope, options: options || {}, ts: Date.now() });
+        localStorage.setItem(PENDING_CLOUD_SYNC_KEY, JSON.stringify(queue.slice(-30)));
+      } catch (_) {}
+    }
+
+    async flushPendingCloud(database) {
+      if (!this.fb.isEnabled()) return;
+      let queue = [];
+      try { queue = JSON.parse(localStorage.getItem(PENDING_CLOUD_SYNC_KEY) || '[]'); } catch (_) {}
+      if (!queue.length) return;
+      localStorage.removeItem(PENDING_CLOUD_SYNC_KEY);
+      for (const item of queue) {
+        try {
+          await this.persist(database, item.scope || 'full', item.options || {});
+        } catch (err) {
+          console.warn('[DataStore] flushPendingCloud:', err);
+        }
+      }
+    }
+
+    /** Guarda siempre en localStorage y replica a Firestore según scope (escrituras en paralelo) */
+    async persist(database, scope = 'local', options = {}) {
       if (!database.manualKnowledge) {
         database.manualKnowledge = (database.knowledge || []).filter((k) => k.origin !== 'gadget');
       }
       localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
+      if (scope === 'local') {
+        return { local: true, cloud: false };
+      }
       if (!this.fb.isEnabled() || this.sync._syncing) {
-        return { local: true, cloud: false, reason: 'offline_or_syncing' };
+        this._enqueuePending(scope, options);
+        return { local: true, cloud: false, reason: this.fb.isEnabled() ? 'syncing' : 'offline' };
       }
 
       this.sync._pushing = true;
       let cloudOk = true;
       let lastErr = null;
-      try {
-        try {
-          if (scope === 'full' || scope === 'settings') {
+      const gadgetOpts = { ...(options.gadget || {}) };
+      const knowledgeOpts = { ...(options.knowledge || {}) };
+      if (scope === 'full' && options.fullSync) {
+        gadgetOpts.fullSync = true;
+        knowledgeOpts.fullSync = true;
+      }
+
+      const ops = [];
+
+      if (scope === 'full' || scope === 'settings') {
+        ops.push((async () => {
+          try {
             database.settings = database.settings || {};
             database.settings.updatedAt = Date.now();
             await this.sync.ensureCondominioDoc(database.settings?.buildingName);
             const synced = await this.sync.syncSettings(database.settings);
             if (synced?.updatedAt) database.settings.updatedAt = synced.updatedAt;
             localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
+          } catch (err) {
+            cloudOk = false;
+            lastErr = err;
+            console.warn('[DataStore] persist settings:', err);
           }
-        } catch (err) {
-          cloudOk = false;
-          lastErr = err;
-          console.warn('[DataStore] persist settings:', err);
-        }
-        try {
-          if (scope === 'full' || scope === 'gadgetKB') {
-            await this.sync.pushGadgetKB(database.gadgetKB || []);
+        })());
+      }
+
+      if (scope === 'full' || scope === 'gadgetKB') {
+        ops.push((async () => {
+          try {
+            await this.sync.pushGadgetKB(database.gadgetKB || [], gadgetOpts);
+          } catch (err) {
+            cloudOk = false;
+            lastErr = err;
+            console.warn('[DataStore] persist gadgetKB:', err);
           }
-        } catch (err) {
-          cloudOk = false;
-          lastErr = err;
-          console.warn('[DataStore] persist gadgetKB:', err);
-        }
-        try {
-          if (scope === 'full' || scope === 'knowledge') {
-            await this.sync.pushManualKnowledge(database.manualKnowledge || []);
+        })());
+      }
+
+      if (scope === 'full' || scope === 'knowledge') {
+        ops.push((async () => {
+          try {
+            await this.sync.pushManualKnowledge(database.manualKnowledge || [], knowledgeOpts);
+          } catch (err) {
+            cloudOk = false;
+            lastErr = err;
+            console.warn('[DataStore] persist knowledge:', err);
           }
-        } catch (err) {
-          cloudOk = false;
-          lastErr = err;
-          console.warn('[DataStore] persist knowledge:', err);
-        }
+        })());
+      }
+
+      try {
+        await Promise.all(ops);
         if (!cloudOk && lastErr) {
+          this._enqueuePending(scope, options);
           const msg = lastErr.message || String(lastErr);
           const hint = msg.includes('permission') || msg.includes('PERMISSION_DENIED')
             ? 'Publica las reglas de firestore.rules en Firebase Console (proyecto chatbots-hipodromo).'
@@ -3429,6 +3544,8 @@ const ARTURITO_GADGET_KB_SEED = [
       this.sync.startRealtimeSync(database, (type) => {
         if (callbacks.onSync) callbacks.onSync(type);
       });
+
+      await this.flushPendingCloud(database);
 
       return { mode: 'cloud', migrated, counts };
     }
@@ -3898,12 +4015,16 @@ const DatabaseModule = {
     if (!database.conversations) database.conversations = [];
     if (typeof KnowledgeBaseModule !== 'undefined') KnowledgeBaseModule.syncFromGadget();
   },
-  /** Persiste local + nube (UnifiedDataStore) */
-  async save(scope = 'full') {
+  /** Persiste local + nube (UnifiedDataStore). scope: local | settings | gadgetKB | knowledge | full */
+  async save(scope = 'local', options = {}) {
     if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.store) {
-      const result = await ArturitoCloud.store.persist(database, scope);
-      if (!result?.cloud && result?.reason !== 'offline_or_syncing' && typeof App !== 'undefined' && App.mode === 'admin') {
-        toast('No se pudo sincronizar con la nube. Revisa la conexión.', 'error');
+      const result = await ArturitoCloud.store.persist(database, scope, options);
+      if (!result?.cloud && result?.reason !== 'syncing' && typeof App !== 'undefined' && App.mode === 'admin') {
+        if (result?.reason === 'offline') {
+          toast('Guardado local. Se subirá a la nube al reconectar.', 'info');
+        } else {
+          toast('No se pudo sincronizar con la nube. Revisa la conexión.', 'error');
+        }
       }
       return result;
     }
@@ -3941,7 +4062,7 @@ const DatabaseModule = {
       database = data;
       this.ensureDefaults();
       if (typeof KnowledgeBaseModule !== 'undefined') KnowledgeBaseModule.syncFromGadget();
-      this.save();
+      this.save('full', { fullSync: true });
       return true;
     }
     return false;
@@ -3951,7 +4072,7 @@ const DatabaseModule = {
     const keys = Object.keys(localStorage).filter(k => k.startsWith(BACKUP_PREFIX)).sort();
     if (!keys.length) return false;
     database = JSON.parse(localStorage.getItem(keys[keys.length-1]));
-    this.ensureDefaults(); this.save(); return true;
+    this.ensureDefaults(); this.save('full', { fullSync: true }); return true;
   }
 };
 
@@ -5016,24 +5137,25 @@ const GadgetKBModule = {
       });
     }
     KnowledgeBaseModule.syncFromGadget();
-    const r = await DatabaseModule.save('gadgetKB');
+    const savedId = editId || database.gadgetKB[database.gadgetKB.length - 1]?.id;
+    const r = await DatabaseModule.save('gadgetKB', { gadget: { changedIds: savedId ? [savedId] : [] } });
     if (r?.cloud) toast('Tema Gadget respaldado en la nube', 'success');
-    await RAGModule.rebuildIndex();
+    void RAGModule.rebuildIndex();
     return payload;
   },
 
   async deleteEntry(id) {
     database.gadgetKB = (database.gadgetKB || []).filter(e => e.id !== id);
     KnowledgeBaseModule.syncFromGadget();
-    const r = await DatabaseModule.save('gadgetKB');
-    await RAGModule.rebuildIndex();
+    const r = await DatabaseModule.save('gadgetKB', { gadget: { deletedIds: [id] } });
+    void RAGModule.rebuildIndex();
     return r;
   },
 
   resetToSeed() {
     if (typeof ARTURITO_GADGET_KB_SEED === 'undefined') return false;
     database.gadgetKB = JSON.parse(JSON.stringify(ARTURITO_GADGET_KB_SEED)).map(e => ({ ...e, createdAt: Date.now() }));
-    DatabaseModule.save('gadgetKB');
+    DatabaseModule.save('gadgetKB', { gadget: { fullSync: true } });
     KnowledgeBaseModule.syncFromGadget();
     return true;
   },
@@ -5085,7 +5207,7 @@ const GadgetKBModule = {
       order: e.order ?? i,
       createdAt: e.createdAt || Date.now()
     }));
-    DatabaseModule.save();
+    DatabaseModule.save('full', { fullSync: true });
     KnowledgeBaseModule.syncFromGadget();
     return true;
   }
@@ -5388,7 +5510,7 @@ const AuthModule = {
         const user = await ArturitoCloud.auth.login(email, pass);
         this.currentUser = user;
         await ArturitoCloud.sync.flushPendingSettings(database);
-        await DatabaseModule.save('full');
+        await DatabaseModule.save('full', { fullSync: true });
         this.hideLogin();
         App.setMode('admin');
         toast('Bienvenido, ' + user.nombre, 'success');
@@ -7134,10 +7256,11 @@ const TrainingModule = {
           };
         }
         KnowledgeBaseModule.syncFromGadget();
-        DatabaseModule.save('gadgetKB').then(() => {
+        const gadgetId = kView.gadgetId || database.gadgetKB[gIdx]?.id;
+        DatabaseModule.save('gadgetKB', { gadget: { changedIds: gadgetId ? [gadgetId] : [] } }).then((r) => {
           closeModal('modalKnowledge'); this.renderManual(); this.renderGadgetKB(); this.renderStats();
-          RAGModule.rebuildIndex();
-          toast('Tema actualizado y respaldado en la nube', 'success');
+          void RAGModule.rebuildIndex();
+          toast(r?.cloud ? 'Tema actualizado y respaldado en la nube' : 'Guardado local. Se sincronizará al reconectar.', r?.cloud ? 'success' : 'info');
         });
         return;
       }
@@ -7149,10 +7272,11 @@ const TrainingModule = {
       database.manualKnowledge.unshift({ id: DatabaseModule.uid('k'), origin: 'manual', ...data, createdAt: Date.now() });
     }
     KnowledgeBaseModule.syncFromGadget();
-    DatabaseModule.save('knowledge').then(() => {
+    const manualId = editId || database.manualKnowledge[0]?.id;
+    DatabaseModule.save('knowledge', { knowledge: { changedIds: manualId ? [manualId] : [] } }).then((r) => {
       closeModal('modalKnowledge'); this.renderManual(); this.renderStats();
-      RAGModule.rebuildIndex();
-      toast('Base manual guardada — Arturito ya puede usarla', 'success');
+      void RAGModule.rebuildIndex();
+      toast(r?.cloud ? 'Base manual guardada en la nube' : 'Guardado local. Se sincronizará al reconectar.', r?.cloud ? 'success' : 'info');
     });
   },
   removeManual(id) {
@@ -7163,13 +7287,21 @@ const TrainingModule = {
     if (!confirm(msg)) return;
     if (entry?.gadgetId) {
       database.gadgetKB = (database.gadgetKB || []).filter(g => g.id !== entry.gadgetId);
+      database.manualKnowledge = (database.manualKnowledge || database.knowledge.filter(k => k.origin !== 'gadget')).filter(k => k.id !== id);
+      KnowledgeBaseModule.syncFromGadget();
+      DatabaseModule.save('gadgetKB', { gadget: { deletedIds: [entry.gadgetId] } }).then(() => {
+        this.renderManual(); this.renderGadgetKB(); this.renderStats();
+        void RAGModule.rebuildIndex();
+        toast('Tema eliminado de la nube', 'info');
+      });
+      return;
     }
     database.manualKnowledge = (database.manualKnowledge || database.knowledge.filter(k => k.origin !== 'gadget')).filter(k => k.id !== id);
     KnowledgeBaseModule.syncFromGadget();
-    DatabaseModule.save('knowledge').then(() => {
+    DatabaseModule.save('knowledge', { knowledge: { deletedIds: [id] } }).then(() => {
       this.renderManual(); this.renderGadgetKB(); this.renderStats();
-      RAGModule.rebuildIndex();
-      toast('Entrada eliminada', 'info');
+      void RAGModule.rebuildIndex();
+      toast('Entrada eliminada de la nube', 'info');
     });
   },
   exportManual() {
@@ -7612,7 +7744,9 @@ const App = {
 
     window.addEventListener('online', () => {
       if (typeof ArturitoCloud === 'undefined' || !ArturitoCloud.store) return;
-      void ArturitoCloud.store.refreshFromCloud(database, (type) => App.applyCloudUpdate(type));
+      void ArturitoCloud.store.flushPendingCloud(database).then(() =>
+        ArturitoCloud.store.refreshFromCloud(database, (type) => App.applyCloudUpdate(type))
+      );
     });
 
     void this._initHeavy(boot);
