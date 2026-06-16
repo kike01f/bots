@@ -7921,7 +7921,8 @@ const TicketEmailDebug = {
     if (!mailId || typeof ArturitoCloud === 'undefined' || !ArturitoCloud.fb?.isEnabled()) return;
     const { doc, getDoc } = ArturitoCloud.fb._modules;
     const ref = doc(ArturitoCloud.fb.db, 'mail', mailId);
-    this.log('Esperando extensión Trigger Email…', { mailId, intentos: maxAttempts });
+    const dbId = ArturitoCloud.fb.getFirestoreDatabaseId?.() || 'artutitohipodromo02';
+    this.log('Esperando extensión Trigger Email…', { mailId, database: dbId });
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((r) => setTimeout(r, 2000));
       try {
@@ -7940,23 +7941,34 @@ const TicketEmailDebug = {
             state: delivery.state,
             error: delivery.error || delivery.info || delivery
           });
-          this.warn('Solución', 'Firebase Console → Extensions → Trigger Email → Reconfigure. SMTP_CONNECTION_URI debe ser Gmail + contraseña de app real (no TU_GMAIL). DATABASE=artutitohipodromo02.');
+          this.warn('Solución', 'Firebase Console → Extensions → Trigger Email → Reconfigure. SMTP Gmail + contraseña de app. DATABASE=artutitohipodromo02.');
           return { ok: false, delivery };
         }
         if (delivery.state === 'PENDING' || delivery.state === 'PROCESSING') continue;
         this.log('Estado delivery', delivery);
       } catch (err) {
+        const denied = err?.code === 'permission-denied' || /permission/i.test(String(err.message));
+        if (denied) {
+          this.warn('Diagnóstico mail/ bloqueado por reglas', {
+            mailId,
+            database: dbId,
+            solucion: 'Publica firestore.rules en la base artutitohipodromo02 (no en default): firebase deploy --only firestore:rules'
+          });
+          this.log('El ticket SÍ se encoló en mail/. Revisa delivery en Firebase Console → Firestore → artutitohipodromo02 → mail/' + mailId);
+          return { ok: false, permission: true };
+        }
         this.warn('Error leyendo mail/' + mailId, err.message);
         return { ok: false, error: err.message };
       }
     }
-    this.warn('Sin respuesta de la extensión en 30 s', {
+    this.warn('Sin campo delivery en 30 s — revisa en Firebase Console', {
       mailId,
+      path: `mail/${mailId}`,
+      database: dbId,
       causas: [
-        'Extensión Trigger Email no instalada o inactiva',
-        'Extensión apunta a otra base de datos (debe ser artutitohipodromo02)',
-        'MAIL_COLLECTION distinto de "mail"',
-        'Revisa Firebase Console → Extensions → Logs'
+        'Extensión Trigger Email: SMTP incorrecto o base distinta de artutitohipodromo02',
+        'Extensions → Trigger Email → Logs',
+        'Abre el doc mail/ en consola y mira si existe delivery.error'
       ]
     });
     return { ok: false, timeout: true };
