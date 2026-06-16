@@ -657,6 +657,24 @@ body.mode-client #adminApp{display:none!important}
   #modalTicket .ticket-attach-actions{width:100%;justify-content:flex-end}
 }
 
+/* ─── Tickets por correo ─── */
+.nav-item .nav-badge{display:inline-flex;align-items:center;justify-content:center;min-width:1.15rem;height:1.15rem;padding:0 .35rem;margin-left:.35rem;border-radius:99px;background:#ef4444;color:#fff;font-size:.65rem;font-weight:700;line-height:1}
+.email-ticket-stats{display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem}
+.email-ticket-stats .stat-pill{padding:.45rem .75rem;border-radius:999px;background:color-mix(in srgb,var(--primary) 8%,var(--bg-card));border:1px solid var(--border);font-size:.78rem}
+.email-ticket-stats .stat-pill strong{font-weight:700;color:var(--primary)}
+.email-thread{display:flex;flex-direction:column;gap:.75rem;max-height:340px;overflow-y:auto;padding:.5rem;background:color-mix(in srgb,var(--primary) 3%,var(--bg));border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:1rem}
+.email-msg{max-width:88%;padding:.65rem .85rem;border-radius:12px;font-size:.84rem;line-height:1.5;word-break:break-word}
+.email-msg.cliente{align-self:flex-start;background:#fff;border:1px solid var(--border);border-bottom-left-radius:4px}
+.email-msg.administrador{align-self:flex-end;background:color-mix(in srgb,var(--primary) 12%,#fff);border:1px solid color-mix(in srgb,var(--primary) 25%,var(--border));border-bottom-right-radius:4px}
+.email-msg-meta{font-size:.68rem;color:var(--text-muted);margin-bottom:.25rem;display:flex;gap:.5rem;flex-wrap:wrap}
+.email-msg-meta strong{color:var(--text);font-weight:600}
+.email-reply-box{margin-top:.5rem;padding-top:1rem;border-top:1px dashed var(--border)}
+.email-notif-toast{position:fixed;top:1rem;right:1rem;z-index:9999;max-width:320px;padding:.75rem 1rem;background:var(--bg-card);border:1px solid var(--border);border-left:4px solid var(--primary);border-radius:var(--radius-sm);box-shadow:var(--shadow-lg);font-size:.82rem;animation:slideIn .3s ease}
+@keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}
+.email-config-card{margin-top:1.5rem;padding-top:1.25rem;border-top:1px dashed var(--border)}
+.email-config-card h3{margin:0 0 .35rem;font-size:1rem}
+.email-config-card p{font-size:.82rem;color:var(--text-muted);margin:0 0 1rem}
+
 .doc-preview{max-height:320px;overflow-y:auto;padding:1rem;background:color-mix(in srgb,var(--primary) 4%,var(--bg));border:1px solid var(--border);border-radius:var(--radius-sm);font-size:.85rem;line-height:1.6;white-space:pre-wrap;word-break:break-word}
 .topic-list{margin-top:1rem;display:flex;flex-direction:column;gap:.5rem}
 .topic-chip{display:flex;align-items:flex-start;gap:.65rem;padding:.65rem .85rem;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:.82rem}
@@ -875,6 +893,7 @@ body.mode-client #adminApp{display:none!important}
     <nav class="nav" id="mainNav">
       <button class="nav-item active" data-view="admin"><span class="icon" data-icon="dashboard"></span> Dashboard</button>
       <button class="nav-item" data-view="tickets"><span class="icon" data-icon="tickets"></span> Tickets</button>
+      <button class="nav-item" data-view="email-tickets"><span class="icon" data-icon="mail"></span> Tickets por Correo <span class="nav-badge" id="emailTicketBadge" style="display:none">0</span></button>
       <button class="nav-item" data-view="knowledge"><span class="icon" data-icon="brain"></span> Entrenamiento IA</button>
       <button class="nav-item" data-view="users"><span class="icon" data-icon="users"></span> Usuarios</button>
       <button class="nav-item" data-view="reports"><span class="icon" data-icon="reports"></span> Reportes</button>
@@ -926,6 +945,26 @@ body.mode-client #adminApp{display:none!important}
             <th data-sort="categoria">Categoría</th><th data-sort="prioridad">Prioridad</th><th data-sort="estado">Estado</th>
             <th data-sort="createdAt">Fecha</th><th>Acciones</th>
           </tr></thead><tbody id="ticketsBody"></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- TICKETS POR CORREO -->
+      <section class="view" id="view-email-tickets">
+        <div class="email-ticket-stats" id="emailTicketStats"></div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">📬 Tickets por Correo</span>
+            <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+              <button class="btn btn-secondary btn-sm" id="btnPollEmailsNow"><span data-icon="refresh" data-icon-size="sm"></span> Revisar correo</button>
+            </div>
+          </div>
+          <div class="toolbar">
+            <div class="search-box"><input type="text" id="emailTicketSearch" placeholder="Buscar por ticket, remitente o asunto..."></div>
+            <select id="emailTicketFilterStatus"><option value="">Todos estados</option></select>
+          </div>
+          <div class="table-wrap"><table id="emailTicketsTable"><thead><tr>
+            <th>Ticket</th><th>Fecha</th><th>Remitente</th><th>Asunto</th><th>Estado</th><th>Acciones</th>
+          </tr></thead><tbody id="emailTicketsBody"></tbody></table></div>
         </div>
       </section>
 
@@ -1162,6 +1201,45 @@ body.mode-client #adminApp{display:none!important}
           </div>
           <div class="settings-preview" id="settingsPreview"></div>
           <div class="settings-preview" id="portalPreview" style="margin-top:.75rem;flex-direction:column;align-items:stretch;text-align:center"></div>
+          <div class="email-config-card">
+            <h3>Configuración de Correo</h3>
+            <p>Conecta la cuenta de soporte para recibir tickets automáticamente y responder desde el panel. Compatible con Gmail (contraseña de aplicación) y servidores SMTP/IMAP.</p>
+            <form id="emailConfigForm" class="form-grid">
+              <div class="form-group"><label>Servidor SMTP</label><input type="text" id="emailSmtpHost" placeholder="smtp.gmail.com"></div>
+              <div class="form-group"><label>Puerto SMTP</label><input type="number" id="emailSmtpPort" placeholder="587" value="587"></div>
+              <div class="form-group"><label>Servidor IMAP <span style="font-weight:400;color:var(--text-muted)">(opcional)</span></label><input type="text" id="emailImapHost" placeholder="imap.gmail.com"></div>
+              <div class="form-group"><label>Puerto IMAP</label><input type="number" id="emailImapPort" placeholder="993" value="993"></div>
+              <div class="form-group"><label>Usuario / correo</label><input type="email" id="emailUser" placeholder="soporte@condominio.cl"></div>
+              <div class="form-group"><label>Contraseña <span style="font-weight:400;color:var(--text-muted)">(dejar vacío para no cambiar)</span></label><input type="password" id="emailPassword" autocomplete="new-password"></div>
+              <div class="form-group"><label>Correo de soporte (remitente)</label><input type="email" id="emailSupport" placeholder="soporte@condominio.cl"></div>
+              <div class="form-group"><label>Nombre remitente</label><input type="text" id="emailFromName" placeholder="Soporte Edificio"></div>
+              <div class="form-group full"><label style="display:flex;align-items:center;gap:.5rem;font-weight:400"><input type="checkbox" id="emailEnabled" checked> Activar recepción automática de correos</label></div>
+              <div class="form-group full" style="display:flex;gap:.5rem;flex-wrap:wrap">
+                <button type="submit" class="btn btn-primary btn-sm"><span data-icon="save" data-icon-size="sm"></span> Guardar configuración</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnTestEmailConfig"><span data-icon="check" data-icon-size="sm"></span> Probar conexión</button>
+              </div>
+              <div class="form-group full"><span id="emailConfigStatus" style="font-size:.78rem;color:var(--text-muted)"></span></div>
+            </form>
+          </div>
+          <div class="email-config-card" id="cloudSetupCard">
+            <h3>Configuración inicial Firebase</h3>
+            <p>Crea el administrador en Firebase Authentication para acceder al panel, tickets por correo y Cloud Functions. Solo necesitas hacerlo una vez por proyecto.</p>
+            <form id="cloudAdminForm" class="form-grid">
+              <div class="form-group"><label>Nombre</label><input type="text" id="setupAdminNombre" value="Administrador"></div>
+              <div class="form-group"><label>Correo admin</label><input type="email" id="setupAdminEmail" value="admin@edificio.cl" autocomplete="username"></div>
+              <div class="form-group"><label>Contraseña</label><input type="password" id="setupAdminPass" value="admin123" autocomplete="new-password"></div>
+              <div class="form-group"><label>Rol</label><select id="setupAdminRol"><option value="Administrador">Administrador</option><option value="SuperAdmin">SuperAdmin</option><option value="Supervisor">Supervisor</option></select></div>
+              <div class="form-group full" style="display:flex;gap:.5rem;flex-wrap:wrap">
+                <button type="submit" class="btn btn-primary btn-sm"><span data-icon="users" data-icon-size="sm"></span> Crear admin en Firebase Auth</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnDeployFirestoreRules">Publicar reglas Firestore</button>
+              </div>
+              <div class="form-group full"><span id="cloudSetupStatus" style="font-size:.78rem;color:var(--text-muted)"></span></div>
+            </form>
+            <details style="margin-top:.75rem;font-size:.78rem;color:var(--text-muted)">
+              <summary style="cursor:pointer;font-weight:600;color:var(--text)">Desplegar Cloud Functions (terminal local)</summary>
+              <pre id="deployCommandsBlock" style="margin-top:.5rem;padding:.75rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);overflow-x:auto;white-space:pre-wrap;font-size:.72rem;line-height:1.5"></pre>
+            </details>
+          </div>
         </div>
       </section>
     </div>
@@ -1204,6 +1282,37 @@ body.mode-client #adminApp{display:none!important}
       <button type="submit" class="btn btn-primary"><span data-icon="send" data-icon-size="sm"></span> Enviar solicitud</button>
     </div>
   </form>
+  </div>
+</div></div>
+
+<div class="modal-overlay" id="modalEmailTicket"><div class="modal" style="max-width:720px;width:100%">
+  <div class="modal-header">
+    <div>
+      <h3 id="emailTicketModalTitle">Ticket por correo</h3>
+      <p id="emailTicketModalSub" style="font-size:.78rem;color:var(--text-muted);margin:.25rem 0 0"></p>
+    </div>
+    <button type="button" class="modal-close" data-close="modalEmailTicket">×</button>
+  </div>
+  <div style="padding:0 1.25rem 1.25rem">
+    <div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:.75rem;font-size:.8rem">
+      <span><strong>Estado:</strong> <span id="emailTicketEstado"></span></span>
+      <span><strong>Correo:</strong> <span id="emailTicketEmail"></span></span>
+    </div>
+    <div class="email-thread" id="emailTicketThread"></div>
+    <div class="email-reply-box">
+      <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.35rem">Responder al residente</label>
+      <textarea id="emailTicketReply" rows="4" placeholder="Escribe tu respuesta..." style="width:100%;margin-bottom:.65rem"></textarea>
+      <div style="display:flex;gap:.5rem;justify-content:flex-end;flex-wrap:wrap">
+        <select id="emailTicketEstadoSelect" style="padding:.45rem .65rem;border-radius:var(--radius-sm);border:1px solid var(--border);font-size:.82rem">
+          <option value="Abierto">Abierto</option>
+          <option value="En Revisión">En Revisión</option>
+          <option value="En Proceso">En Proceso</option>
+          <option value="Resuelto">Resuelto</option>
+          <option value="Cerrado">Cerrado</option>
+        </select>
+        <button type="button" class="btn btn-primary btn-sm" id="btnSendEmailReply"><span data-icon="send" data-icon-size="sm"></span> Enviar Respuesta</button>
+      </div>
+    </div>
   </div>
 </div></div>
 
@@ -2288,13 +2397,14 @@ const ARTURITO_GADGET_KB_SEED = [
 
   /** @returns {Promise<object>} Firebase modular SDK */
   async function loadFirebaseModules() {
-    const [appMod, authMod, fsMod, stMod] = await Promise.all([
+    const [appMod, authMod, fsMod, stMod, fnMod] = await Promise.all([
       import(sdkUrl('firebase-app.js')),
       import(sdkUrl('firebase-auth.js')),
       import(sdkUrl('firebase-firestore.js')),
-      import(sdkUrl('firebase-storage.js'))
+      import(sdkUrl('firebase-storage.js')),
+      import(sdkUrl('firebase-functions.js'))
     ]);
-    return { ...appMod, ...authMod, ...fsMod, ...stMod };
+    return { ...appMod, ...authMod, ...fsMod, ...stMod, ...fnMod };
   }
 
   /* ─── FirebaseManager ─── */
@@ -2306,6 +2416,7 @@ const ARTURITO_GADGET_KB_SEED = [
       this.auth = null;
       this.db = null;
       this.storage = null;
+      this.functions = null;
       this.enabled = false;
       this.condominioId = null;
       this._modules = null;
@@ -2389,11 +2500,12 @@ const ARTURITO_GADGET_KB_SEED = [
       }
       try {
         this._modules = await loadFirebaseModules();
-        const { initializeApp, getAuth, getFirestore, getStorage } = this._modules;
+        const { initializeApp, getAuth, getFirestore, getStorage, getFunctions } = this._modules;
         this.app = initializeApp(config);
         this.auth = getAuth(this.app);
         this.db = getFirestore(this.app);
         this.storage = getStorage(this.app);
+        this.functions = getFunctions(this.app, 'us-central1');
         this.enabled = true;
         this.condominioId = config.condominioId || config.projectId || 'default';
         this.saveConfig({ ...config, condominioId: this.condominioId });
@@ -2648,8 +2760,12 @@ const ARTURITO_GADGET_KB_SEED = [
     mapFromLocal(t) {
       return {
         id: t.id,
-        numeroTicket: t.id,
-        asunto: t.categoria,
+        numeroTicket: t.numeroTicket || t.id,
+        origen: t.origen || 'portal',
+        asunto: t.asunto || t.categoria,
+        mensaje: t.mensaje || t.descripcion,
+        remitente: t.remitente || t.nombre,
+        historial: t.historial || [],
         descripcion: t.descripcion,
         categoria: t.categoria,
         prioridad: t.prioridad,
@@ -2661,23 +2777,31 @@ const ARTURITO_GADGET_KB_SEED = [
         fechaActualizacion: t.updatedAt || Date.now(),
         creadoPor: t.creadoPor || t.email,
         asignadoA: t.asignadoA || null,
-        adjuntos: t.attachments || []
+        adjuntos: t.attachments || t.adjuntos || []
       };
     }
 
     mapToLocal(d, id) {
       return {
         id: d.numeroTicket || id,
-        nombre: d.nombre || '',
+        numeroTicket: d.numeroTicket || id,
+        origen: d.origen || 'portal',
+        remitente: d.remitente || d.nombre || '',
+        asunto: d.asunto || '',
+        mensaje: d.mensaje || d.descripcion || '',
+        historial: d.historial || [],
+        nombre: d.nombre || d.remitente || '',
         departamento: d.departamento || '',
         email: d.email || '',
         categoria: d.categoria || d.asunto || 'Consultas',
         prioridad: d.prioridad || 'Media',
-        descripcion: d.descripcion || '',
+        descripcion: d.descripcion || d.mensaje || '',
         estado: d.estado || 'Abierto',
-        attachments: d.adjuntos || [],
-        createdAt: d.fechaCreacion || Date.now(),
-        updatedAt: d.fechaActualizacion || Date.now(),
+        attachments: d.adjuntos || d.attachments || [],
+        adjuntos: d.adjuntos || d.attachments || [],
+        emailMessageId: d.emailMessageId || null,
+        createdAt: d.fechaCreacion || d.createdAt || Date.now(),
+        updatedAt: d.fechaActualizacion || d.updatedAt || Date.now(),
         asignadoA: d.asignadoA,
         creadoPor: d.creadoPor
       };
@@ -2844,6 +2968,78 @@ const ARTURITO_GADGET_KB_SEED = [
     async markRead(id) {
       const { updateDoc, doc } = this.fb._modules;
       await updateDoc(doc(this.fb.col('notifications'), id), { leida: true });
+    }
+  }
+
+  /* ─── CloudEmailManager — Tickets por correo (SMTP/IMAP + Cloud Functions) ─── */
+  class CloudEmailManager {
+    constructor(fb, auth) {
+      this.fb = fb;
+      this.auth = auth;
+    }
+
+    configPath() {
+      return `condominios/${this.fb.getCondominioId()}/email_config/main`;
+    }
+
+    async getConfig() {
+      if (!this.fb.isEnabled()) return null;
+      const { getDoc } = this.fb._modules;
+      const snap = await getDoc(this.fb.doc(this.configPath()));
+      return snap.exists() ? snap.data() : null;
+    }
+
+    async saveConfig(partial) {
+      if (!this.fb.isEnabled()) throw new Error('Firebase no conectado');
+      if (!this.auth.currentUser) throw new Error('Inicia sesión como administrador');
+      const { setDoc, getDoc } = this.fb._modules;
+      const existing = (await getDoc(this.fb.doc(this.configPath()))).data() || {};
+      const data = {
+        ...existing,
+        ...partial,
+        updatedAt: Date.now()
+      };
+      if (!partial.password) data.password = existing.password;
+      await setDoc(this.fb.doc(this.configPath()), data, { merge: true });
+      return data;
+    }
+
+    _callable(name) {
+      if (!this.fb.functions) throw new Error('Cloud Functions no inicializadas');
+      const { httpsCallable } = this.fb._modules;
+      return httpsCallable(this.fb.functions, name);
+    }
+
+    async sendReply(ticketId, mensaje, adminNombre) {
+      const fn = this._callable('sendEmailTicketReply');
+      const res = await fn({
+        condominioId: this.fb.getCondominioId(),
+        ticketId,
+        mensaje,
+        adminNombre
+      });
+      return res.data;
+    }
+
+    async testConfig() {
+      const fn = this._callable('testEmailConfig');
+      const res = await fn({ condominioId: this.fb.getCondominioId() });
+      return res.data;
+    }
+
+    async pollNow() {
+      const fn = this._callable('pollEmailsNow');
+      const res = await fn({ condominioId: this.fb.getCondominioId() });
+      return res.data;
+    }
+
+    async updateTicketStatus(ticketId, estado) {
+      const { updateDoc } = this.fb._modules;
+      await updateDoc(this.fb.doc(`condominios/${this.fb.getCondominioId()}/tickets/${ticketId}`), {
+        estado,
+        fechaActualizacion: Date.now(),
+        updatedAt: Date.now()
+      });
     }
   }
 
@@ -3913,6 +4109,7 @@ const ARTURITO_GADGET_KB_SEED = [
   const knowledge = new KnowledgeManager(fb);
   const notifications = new NotificationManager(fb, auth);
   const tickets = new CloudTicketManager(fb, storage, notifications);
+  const email = new CloudEmailManager(fb, auth);
   const training = new TrainingManagerFB(fb, storage);
   const sync = new CloudSyncBridge(fb, auth, tickets, knowledge);
   const store = new UnifiedDataStore(fb, sync);
@@ -3930,6 +4127,7 @@ const ARTURITO_GADGET_KB_SEED = [
     knowledge,
     notifications,
     tickets,
+    email,
     training,
     sync,
     store,
@@ -4019,6 +4217,7 @@ const IconSVG = {
   _paths: {
     dashboard: ['M3 3h8v8H3z', 'M13 3h8v8h-8z', 'M3 13h8v8H3z', 'M13 13h8v8h-8z'],
     tickets: ['M2 9a3 3 0 0 1 3-3h14a3 3 0 0 1 3 3v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9z', 'M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'],
+    mail: ['M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z', 'M22 6l-10 7L2 6'],
     brain: ['M12 2a7 7 0 0 0-4 12.7V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.3A7 7 0 0 0 12 2z', 'M9 17h6', 'M10 21h4'],
     users: ['M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2', 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z', 'M22 21v-2a4 4 0 0 0-3-3.87', 'M16 3.13a4 4 0 0 1 0 7.75'],
     reports: ['M3 3v18h18', 'M7 16l4-4 4 4 5-6'],
@@ -7940,6 +8139,358 @@ const TicketModule = {
   }
 };
 
+/* ─── EmailTicketModule — Tickets recibidos por correo ─── */
+const EmailTicketModule = {
+  _currentId: null,
+  _notifStarted: false,
+  _lastToastId: null,
+
+  init() {
+    document.getElementById('emailTicketSearch')?.addEventListener('input', () => this.render());
+    document.getElementById('emailTicketFilterStatus')?.addEventListener('change', () => this.render());
+    document.getElementById('btnPollEmailsNow')?.addEventListener('click', () => this.pollNow());
+    document.getElementById('btnSendEmailReply')?.addEventListener('click', () => this.sendReply());
+    document.getElementById('emailTicketEstadoSelect')?.addEventListener('change', (e) => this.changeStatus(e.target.value));
+    document.getElementById('emailConfigForm')?.addEventListener('submit', (e) => this.saveEmailConfig(e));
+    document.getElementById('btnTestEmailConfig')?.addEventListener('click', () => this.testEmailConfig());
+
+    const statusSel = document.getElementById('emailTicketFilterStatus');
+    if (statusSel) {
+      statusSel.innerHTML = `<option value="">Todos estados</option>${STATUSES.map((s) => `<option value="${s}">${s}</option>`).join('')}`;
+    }
+  },
+
+  getEmailTickets() {
+    return (database.tickets || []).filter((t) => t.origen === 'email');
+  },
+
+  getOpenCount() {
+    const open = ['Abierto', 'En Revisión', 'Asignado', 'En Proceso'];
+    return this.getEmailTickets().filter((t) => open.includes(t.estado)).length;
+  },
+
+  updateBadge() {
+    const badge = document.getElementById('emailTicketBadge');
+    if (!badge) return;
+    const n = this.getOpenCount();
+    badge.textContent = n;
+    badge.style.display = n > 0 ? 'inline-flex' : 'none';
+  },
+
+  renderStats() {
+    const el = document.getElementById('emailTicketStats');
+    if (!el) return;
+    const all = this.getEmailTickets();
+    const open = this.getOpenCount();
+    el.innerHTML = `
+      <div class="stat-pill"><strong>${all.length}</strong> tickets por correo</div>
+      <div class="stat-pill"><strong>${open}</strong> abiertos</div>`;
+  },
+
+  render() {
+    this.renderStats();
+    this.updateBadge();
+    const q = (document.getElementById('emailTicketSearch')?.value || '').toLowerCase();
+    const st = document.getElementById('emailTicketFilterStatus')?.value || '';
+    const tickets = this.getEmailTickets().filter((t) => {
+      if (st && t.estado !== st) return false;
+      const blob = `${t.numeroTicket || t.id} ${t.remitente || t.nombre} ${t.asunto || ''} ${t.email || ''}`.toLowerCase();
+      if (q && !blob.includes(q)) return false;
+      return true;
+    }).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+    const tbody = document.getElementById('emailTicketsBody');
+    if (!tbody) return;
+    tbody.innerHTML = tickets.length ? tickets.map((t) => `<tr>
+      <td><strong>${escapeHtml(t.numeroTicket || t.id)}</strong></td>
+      <td>${fmtDate(t.createdAt)}</td>
+      <td>${escapeHtml(t.remitente || t.nombre)}<br><small style="color:var(--text-muted)">${escapeHtml(t.email || '')}</small></td>
+      <td>${escapeHtml(t.asunto || '—')}</td>
+      <td>${badgeStatus(t.estado)}</td>
+      <td>${actionBtn('eye', `EmailTicketModule.open('${t.id}')`, 'Abrir')}</td>
+    </tr>`).join('') : '<tr><td colspan="6"><div class="empty-state">No hay tickets por correo</div></td></tr>';
+  },
+
+  open(id) {
+    const t = database.tickets.find((x) => x.id === id && x.origen === 'email');
+    if (!t) return;
+    this._currentId = id;
+    document.getElementById('emailTicketModalTitle').textContent = t.numeroTicket || t.id;
+    document.getElementById('emailTicketModalSub').textContent = t.asunto || '';
+    document.getElementById('emailTicketEstado').innerHTML = badgeStatus(t.estado);
+    document.getElementById('emailTicketEmail').textContent = t.email || '—';
+    document.getElementById('emailTicketEstadoSelect').value = t.estado;
+    document.getElementById('emailTicketReply').value = '';
+    this.renderThread(t);
+    openModal('modalEmailTicket');
+    hydrateIcons(document.getElementById('modalEmailTicket'));
+  },
+
+  renderThread(t) {
+    const thread = document.getElementById('emailTicketThread');
+    if (!thread) return;
+    const historial = t.historial?.length ? t.historial : [{
+      autor: 'cliente',
+      nombre: t.remitente || t.nombre,
+      email: t.email,
+      mensaje: t.mensaje || t.descripcion,
+      fecha: t.createdAt,
+      adjuntos: t.adjuntos || t.attachments || []
+    }];
+    thread.innerHTML = historial.map((h) => {
+      const label = h.autor === 'administrador' ? 'Administrador' : 'Cliente';
+      const cls = h.autor === 'administrador' ? 'administrador' : 'cliente';
+      const att = (h.adjuntos || []).map((a) =>
+        `<a href="${escapeHtml(a.url || '#')}" target="_blank" rel="noopener" style="font-size:.72rem;display:inline-block;margin-top:.25rem">${escapeHtml(a.nombre || 'adjunto')}</a>`
+      ).join('');
+      return `<div class="email-msg ${cls}">
+        <div class="email-msg-meta"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(h.nombre || '')} · ${fmtDate(h.fecha)}</div>
+        <div>${escapeHtml(h.mensaje || '').replace(/\n/g, '<br>')}</div>
+        ${att ? `<div>${att}</div>` : ''}
+      </div>`;
+    }).join('');
+    thread.scrollTop = thread.scrollHeight;
+  },
+
+  async sendReply() {
+    const msg = document.getElementById('emailTicketReply')?.value.trim();
+    if (!msg) { toast('Escribe una respuesta', 'error'); return; }
+    if (!this._currentId) return;
+    if (!ArturitoCloud?.email?.sendReply) {
+      toast('Despliega Cloud Functions para enviar correos', 'error');
+      return;
+    }
+    const btn = document.getElementById('btnSendEmailReply');
+    if (btn) btn.disabled = true;
+    try {
+      const adminNombre = AuthModule.currentUser?.nombre || 'Administración';
+      await ArturitoCloud.email.sendReply(this._currentId, msg, adminNombre);
+      document.getElementById('emailTicketReply').value = '';
+      toast('Respuesta enviada por correo', 'success');
+      setTimeout(() => {
+        const t = database.tickets.find((x) => x.id === this._currentId);
+        if (t) {
+          this.renderThread(t);
+          document.getElementById('emailTicketEstado').innerHTML = badgeStatus(t.estado);
+          document.getElementById('emailTicketEstadoSelect').value = t.estado;
+        }
+      }, 600);
+    } catch (err) {
+      toast(err.message || 'Error al enviar respuesta', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  },
+
+  async changeStatus(estado) {
+    if (!this._currentId || !ArturitoCloud?.email) return;
+    try {
+      await ArturitoCloud.email.updateTicketStatus(this._currentId, estado);
+      document.getElementById('emailTicketEstado').innerHTML = badgeStatus(estado);
+      this.render();
+    } catch (err) {
+      toast('No se pudo cambiar el estado', 'error');
+    }
+  },
+
+  async pollNow() {
+    if (!ArturitoCloud?.email?.pollNow) {
+      toast('Cloud Functions no disponibles', 'error');
+      return;
+    }
+    const btn = document.getElementById('btnPollEmailsNow');
+    if (btn) btn.disabled = true;
+    try {
+      const res = await ArturitoCloud.email.pollNow();
+      toast(`Correo revisado — ${res.processed || 0} mensaje(s) procesado(s)`, 'success');
+      this.render();
+    } catch (err) {
+      toast(err.message || 'Error al revisar correo', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  },
+
+  async loadEmailConfigForm() {
+    if (!ArturitoCloud?.email?.getConfig) return;
+    try {
+      const cfg = await ArturitoCloud.email.getConfig();
+      const statusEl = document.getElementById('emailConfigStatus');
+      if (!cfg) {
+        if (statusEl) statusEl.textContent = 'Sin configuración guardada';
+        return;
+      }
+      document.getElementById('emailSmtpHost').value = cfg.smtpHost || '';
+      document.getElementById('emailSmtpPort').value = cfg.smtpPort || 587;
+      document.getElementById('emailImapHost').value = cfg.imapHost || '';
+      document.getElementById('emailImapPort').value = cfg.imapPort || 993;
+      document.getElementById('emailUser').value = cfg.user || '';
+      document.getElementById('emailSupport').value = cfg.supportEmail || cfg.user || '';
+      document.getElementById('emailFromName').value = cfg.fromName || '';
+      document.getElementById('emailEnabled').checked = cfg.enabled !== false;
+      document.getElementById('emailPassword').value = '';
+      if (statusEl) {
+        statusEl.textContent = cfg.updatedAt
+          ? `Guardado: ${new Date(cfg.updatedAt).toLocaleString('es-CL')}${cfg.password ? ' · Contraseña configurada' : ''}`
+          : 'Configuración guardada';
+      }
+    } catch (err) {
+      console.warn('[EmailConfig] load:', err);
+    }
+  },
+
+  async saveEmailConfig(e) {
+    e.preventDefault();
+    if (!ArturitoCloud?.email?.saveConfig) {
+      toast('Firebase no conectado', 'error');
+      return;
+    }
+    if (!AuthModule.currentUser && AuthModule.useFirebase()) {
+      toast('Inicia sesión como administrador', 'error');
+      return;
+    }
+    const password = document.getElementById('emailPassword').value;
+    const payload = {
+      smtpHost: document.getElementById('emailSmtpHost').value.trim(),
+      smtpPort: parseInt(document.getElementById('emailSmtpPort').value, 10) || 587,
+      imapHost: document.getElementById('emailImapHost').value.trim(),
+      imapPort: parseInt(document.getElementById('emailImapPort').value, 10) || 993,
+      user: document.getElementById('emailUser').value.trim(),
+      supportEmail: document.getElementById('emailSupport').value.trim(),
+      fromName: document.getElementById('emailFromName').value.trim(),
+      enabled: document.getElementById('emailEnabled').checked,
+      buildingName: database.settings?.buildingName || ''
+    };
+    if (password) payload.password = password;
+    try {
+      await ArturitoCloud.email.saveConfig(payload);
+      document.getElementById('emailPassword').value = '';
+      toast('Configuración de correo guardada', 'success');
+      await this.loadEmailConfigForm();
+    } catch (err) {
+      toast(err.message || 'Error al guardar configuración', 'error');
+    }
+  },
+
+  async testEmailConfig() {
+    if (!ArturitoCloud?.email?.testConfig) {
+      toast('Cloud Functions no disponibles', 'error');
+      return;
+    }
+    try {
+      const res = await ArturitoCloud.email.testConfig();
+      toast(res.message || 'Conexión correcta', 'success');
+    } catch (err) {
+      toast(err.message || 'Fallo la prueba de conexión', 'error');
+    }
+  },
+
+  startNotificationWatch() {
+    if (this._notifStarted || !ArturitoCloud?.notifications?.watch) return;
+    this._notifStarted = true;
+    ArturitoCloud.notifications.watch((items) => {
+      this.updateBadge();
+      const unread = items.filter((n) =>
+        !n.leida && (n.tipo === 'email_ticket' || n.tipo === 'email_reply')
+      );
+      const latest = unread[0];
+      if (latest && App.mode === 'admin' && latest.id !== this._lastToastId) {
+        this._lastToastId = latest.id;
+        this.showNotificationToast(latest);
+      }
+    });
+  },
+
+  showNotificationToast(n) {
+    document.querySelector('.email-notif-toast')?.remove();
+    const el = document.createElement('div');
+    el.className = 'email-notif-toast';
+    el.innerHTML = `<strong>${escapeHtml(n.titulo || 'Nuevo correo')}</strong><br>${escapeHtml(n.mensaje || '')}`;
+    el.onclick = () => {
+      NavModule.go('email-tickets');
+      if (n.ticketId) this.open(n.ticketId);
+      if (n.id) ArturitoCloud.notifications.markRead(n.id).catch(() => {});
+      el.remove();
+    };
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 9000);
+  }
+};
+
+/* ─── CloudSetupModule — Admin Auth + instrucciones de deploy ─── */
+const CloudSetupModule = {
+  DEPLOY_CMD: `cd "/Users/kikefrias/Desktop/gestion-comunidad/Entre Cerros"
+cd functions && npm install && cd ..
+firebase login
+firebase use chatbots-hipodromo
+firebase deploy --only firestore:rules,firestore:indexes,functions,hosting`,
+
+  init() {
+    const block = document.getElementById('deployCommandsBlock');
+    if (block) block.textContent = this.DEPLOY_CMD;
+    document.getElementById('cloudAdminForm')?.addEventListener('submit', (e) => this.createCloudAdmin(e));
+    document.getElementById('btnDeployFirestoreRules')?.addEventListener('click', () => this.copyDeployCommands());
+  },
+
+  copyDeployCommands() {
+    navigator.clipboard?.writeText(this.DEPLOY_CMD).then(() => {
+      toast('Comandos de deploy copiados al portapapeles', 'success');
+    }).catch(() => {
+      toast('Copia manualmente los comandos del panel de configuración', 'info');
+    });
+  },
+
+  setStatus(msg, ok) {
+    const el = document.getElementById('cloudSetupStatus');
+    if (el) {
+      el.textContent = msg;
+      el.style.color = ok ? 'var(--success)' : ok === false ? '#ef4444' : 'var(--text-muted)';
+    }
+  },
+
+  async createCloudAdmin(e) {
+    e.preventDefault();
+    if (!ArturitoCloud?.auth?.registerAdmin) {
+      toast('Conecta Firebase primero (Guardar y conectar)', 'error');
+      return;
+    }
+    const email = document.getElementById('setupAdminEmail').value.trim();
+    const password = document.getElementById('setupAdminPass').value;
+    const nombre = document.getElementById('setupAdminNombre').value.trim();
+    const rol = document.getElementById('setupAdminRol').value;
+    if (!email || password.length < 6) {
+      toast('Correo y contraseña (mín. 6 caracteres) requeridos', 'error');
+      return;
+    }
+    this.setStatus('Creando administrador en Firebase Auth…');
+    try {
+      const profile = await ArturitoCloud.auth.registerAdmin({
+        email,
+        password,
+        nombre,
+        rol,
+        condominioId: ArturitoCloud.fb.getCondominioId(),
+        departamento: 'Administración'
+      });
+      AuthModule.currentUser = ArturitoCloud.auth.currentUser;
+      this.setStatus(`Admin creado: ${profile.email} (${profile.rol}). Ya puedes iniciar sesión.`, true);
+      toast('Administrador creado en Firebase Auth', 'success');
+      const badge = document.getElementById('currentUserBadge');
+      if (badge) badge.textContent = `${profile.nombre} · ${profile.rol}`;
+      App.setMode('admin');
+    } catch (err) {
+      const msg = String(err.message || err);
+      if (/email-already-in-use|already in use/i.test(msg)) {
+        this.setStatus('Ese correo ya existe. Usa Iniciar sesión con esas credenciales.', false);
+        toast('El admin ya existe — inicia sesión con ese correo', 'info');
+      } else {
+        this.setStatus(msg, false);
+        toast(msg, 'error');
+      }
+    }
+  }
+};
+
 /* ─── TrainingModule — Entrenamiento IA (documentos IDB + manual) ─── */
 const TrainingModule = {
   _openAnalysisDocId: null,
@@ -9242,7 +9793,7 @@ const ReportModule = {
 
 /* ─── NavModule ─── */
 const NavModule = {
-  titles: { admin:'Dashboard', tickets:'Gestión de Tickets', knowledge:'Entrenamiento IA', users:'Gestión de Usuarios', reports:'Reportes y Análisis', settings:'Configuración' },
+  titles: { admin:'Dashboard', tickets:'Gestión de Tickets', 'email-tickets':'Tickets por Correo', knowledge:'Entrenamiento IA', users:'Gestión de Usuarios', reports:'Reportes y Análisis', settings:'Configuración' },
   /** Navega a una vista */
   go(view) {
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -9252,10 +9803,14 @@ const NavModule = {
     document.getElementById('pageTitle').textContent = this.titles[view]||view;
     if (view === 'admin') AdminModule.render();
     if (view === 'tickets') TicketModule.render();
+    if (view === 'email-tickets') EmailTicketModule.render();
     if (view === 'knowledge') TrainingModule.render();
     if (view === 'users') UserModule.render();
     if (view === 'reports') setTimeout(() => ReportModule.render(), 100);
-    if (view === 'settings') SettingsModule.apply();
+    if (view === 'settings') {
+      SettingsModule.apply();
+      EmailTicketModule.loadEmailConfigForm();
+    }
     document.getElementById('sidebar').classList.remove('open');
   },
   /** Inicializa navegación */
@@ -9347,6 +9902,7 @@ const App = {
     if (this.mode === 'admin') {
       if (type === 'tickets') {
         TicketModule.render();
+        EmailTicketModule.render();
         ReportModule.render();
       }
       AdminModule.render();
@@ -9359,6 +9915,8 @@ const App = {
     document.body.classList.toggle('mode-client', mode === 'client');
     if (mode === 'admin') {
       UserModule.render();
+      EmailTicketModule.startNotificationWatch();
+      EmailTicketModule.updateBadge();
       this.refresh();
       NavModule.go('admin');
     } else {
@@ -9441,6 +9999,8 @@ const App = {
     ChatModule.applyLiveSettings();
     SettingsModule.init();
     TicketModule.init();
+    EmailTicketModule.init();
+    CloudSetupModule.init();
     TrainingModule.init();
     UserModule.init();
     AdminModule.init();
@@ -9450,6 +10010,7 @@ const App = {
     wrapSearchBoxes();
 
     window.TicketModule = TicketModule;
+    window.EmailTicketModule = EmailTicketModule;
     window.ChatModule = ChatModule;
     window.TrainingModule = TrainingModule;
     window.KnowledgeModule = TrainingModule;
@@ -9478,6 +10039,7 @@ const App = {
   /** Refresca vistas administrativas */
   refresh() {
     TicketModule.render();
+    EmailTicketModule.render();
     TrainingModule.renderManual();
     UserModule.render();
     AdminModule.render();
