@@ -2761,9 +2761,17 @@ const ARTURITO_GADGET_KB_SEED = [
 
       await setDoc(doc(this.fb.col('tickets'), id), data);
       const ticketPath = `condominios/${this.fb.getCondominioId()}/tickets/${id}`;
-      console.log('[TicketEmail] Ticket escrito en Firestore → dispara Cloud Function notifyAdminOnTicket', {
+      let mailId = null;
+      try {
+        mailId = await global.TicketEmailDebug?.queueMailForTicket?.(id, this.mapToLocal(data, id));
+      } catch (err) {
+        console.warn('[TicketEmail] queue mail/ desde app:', err);
+        global.toast?.('Ticket guardado. Falta publicar reglas mail/ → bash deploy-firebase.sh', 'warning');
+      }
+      console.log('[TicketEmail] Ticket en Firestore', {
         ticketId: id,
         path: ticketPath,
+        mailId: mailId || '(no encolado — revisa reglas mail/ o TicketEmailDebug)',
         categoria: data.categoria,
         adjuntos: (data.adjuntos || []).length
       });
@@ -7808,7 +7816,7 @@ const TicketEmailDebug = {
       if (issues.length) {
         issues.forEach((i) => this.warn('Problema detectado', i));
       } else {
-        this.log('Checklist OK', 'Crea un ticket de prueba. Revisa mail/ en Firestore y logs de la Function + extensión.');
+        this.log('Checklist OK', 'Al crear ticket la app escribe en mail/ → extensión Trigger Email envía. Revisa mail/ en Firestore y campo delivery.');
       }
       return { ok: issues.length === 0, issues, settings: s };
     } catch (err) {
@@ -7816,8 +7824,98 @@ const TicketEmailDebug = {
       return { ok: false, error: err.message };
     }
   },
+  _escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  },
+  _parseEmails(raw) {
+    return String(raw || '').split(/[,;]/).map((e) => e.trim()).filter(Boolean);
+  },
+  buildTicketEmailPayload(ticketId, ticket, settings) {
+    const s = settings || database.settings || {};
+    const buildingName = s.buildingName || 'Edificio';
+    const adminPanelUrl = s.adminPanelUrl || 'https://chatbots-hipodromo.web.app/admin';
+    const condominioId = typeof ArturitoCloud !== 'undefined' ? ArturitoCloud.fb.getCondominioId() : 'hipodromo';
+    const esc = (v) => this._escapeHtml(v);
+    const adjuntos = (ticket.attachments || ticket.adjuntos || []).map((a) => ({
+      name: a.name || a.nombre || 'adjunto',
+      url: a.url || ''
+    })).filter((a) => a.name || a.url);
+    const adjuntosHtml = adjuntos.length
+      ? `<ul>${adjuntos.map((a) => a.url
+        ? `<li><a href="${esc(a.url)}">${esc(a.name)}</a></li>`
+        : `<li>${esc(a.name)}</li>`).join('')}</ul>`
+      : '<p><em>Sin archivos adjuntos</em></p>';
+    const subject = `[${buildingName}] Nuevo ticket ${ticketId} — ${ticket.categoria || 'Solicitud'}`;
+    const html = `<div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
+      <h2 style="margin:0 0 12px">Nueva solicitud de atención</h2>
+      <p style="margin:0 0 16px;color:#555">${esc(buildingName)} · Condominio <strong>${esc(condominioId)}</strong></p>
+      <table style="border-collapse:collapse;width:100%;max-width:560px">
+        <tr><td style="padding:6px 10px;border:1px solid #ddd;background:#f8fafc"><strong>Ticket</strong></td><td style="padding:6px 10px;border:1px solid #ddd">${esc(ticketId)}</td></tr>
+        <tr><td style="padding:6px 10px;border:1px solid #ddd;background:#f8fafc"><strong>Nombre</strong></td><td style="padding:6px 10px;border:1px solid #ddd">${esc(ticket.nombre)}</td></tr>
+        <tr><td style="padding:6px 10px;border:1px solid #ddd;background:#f8fafc"><strong>Departamento</strong></td><td style="padding:6px 10px;border:1px solid #ddd">${esc(ticket.departamento)}</td></tr>
+        <tr><td style="padding:6px 10px;border:1px solid #ddd;background:#f8fafc"><strong>Correo</strong></td><td style="padding:6px 10px;border:1px solid #ddd">${esc(ticket.email)}</td></tr>
+        <tr><td style="padding:6px 10px;border:1px solid #ddd;background:#f8fafc"><strong>Categoría</strong></td><td style="padding:6px 10px;border:1px solid #ddd">${esc(ticket.categoria || ticket.asunto)}</td></tr>
+        <tr><td style="padding:6px 10px;border:1px solid #ddd;background:#f8fafc"><strong>Prioridad</strong></td><td style="padding:6px 10px;border:1px solid #ddd">${esc(ticket.prioridad)}</td></tr>
+      </table>
+      <h3 style="margin:18px 0 8px">Descripción</h3>
+      <p style="white-space:pre-wrap;background:#f8fafc;padding:12px;border-radius:8px;border:1px solid #e2e8f0">${esc(ticket.descripcion)}</p>
+      <h3 style="margin:18px 0 8px">Adjuntos</h3>${adjuntosHtml}
+      <p style="margin:20px 0 0"><a href="${esc(adminPanelUrl)}" style="display:inline-block;background:#0d9488;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none">Abrir panel de tickets</a></p>
+    </div>`;
+    const text = [
+      `Nueva solicitud: ${ticketId}`,
+      `Edificio: ${buildingName}`,
+      `Nombre: ${ticket.nombre || '—'}`,
+      `Departamento: ${ticket.departamento || '—'}`,
+      `Correo: ${ticket.email || '—'}`,
+      `Categoría: ${ticket.categoria || '—'}`,
+      '',
+      'Descripción:',
+      ticket.descripcion || '—',
+      '',
+      adjuntos.length ? `Adjuntos: ${adjuntos.map((a) => a.url || a.name).join(', ')}` : 'Sin adjuntos',
+      '',
+      `Panel: ${adminPanelUrl}`
+    ].join('\n');
+    return { subject, html, text, buildingName, adminPanelUrl, condominioId };
+  },
+  async queueMailForTicket(ticketId, ticket) {
+    if (typeof ArturitoCloud === 'undefined' || !ArturitoCloud.fb?.isEnabled()) {
+      throw new Error('Firebase no conectado');
+    }
+    const settingsSnap = await this.readCloudSettings();
+    const settings = settingsSnap.ok ? { ...database.settings, ...(settingsSnap.data || {}) } : database.settings;
+    const recipients = this._parseEmails(settings?.notifyAdminEmail);
+    const to = recipients.length ? recipients : ['activawalkermartinez815@gmail.com'];
+    const email = this.buildTicketEmailPayload(ticketId, ticket, settings);
+    const { collection, addDoc, serverTimestamp } = ArturitoCloud.fb._modules;
+    const mailCol = collection(ArturitoCloud.fb.db, 'mail');
+    const docRef = await addDoc(mailCol, {
+      to: to.length === 1 ? to[0] : to,
+      message: { subject: email.subject, html: email.html, text: email.text },
+      meta: {
+        tipo: 'ticket_created',
+        ticketId,
+        condominioId: email.condominioId,
+        source: 'app',
+        database: ArturitoCloud.fb.getFirestoreDatabaseId?.() || 'artutitohipodromo02',
+        createdAt: serverTimestamp()
+      }
+    });
+    this.log('✓ Documento creado en mail/', {
+      mailId: docRef.id,
+      path: `mail/${docRef.id}`,
+      database: ArturitoCloud.fb.getFirestoreDatabaseId?.() || 'artutitohipodromo02',
+      to: to.join(', ')
+    });
+    return docRef.id;
+  },
   async afterTicketCreated(ticketId, ticket) {
-    this.log('✓ Ticket creado — esperando correo al admin', {
+    this.log('✓ Ticket creado — correo encolado en mail/ para Trigger Email', {
       ticketId,
       firestorePath: typeof ArturitoCloud !== 'undefined'
         ? `condominios/${ArturitoCloud.fb.getCondominioId()}/tickets/${ticketId}`
@@ -7825,7 +7923,6 @@ const TicketEmailDebug = {
       solicitante: ticket?.email,
       categoria: ticket?.categoria
     });
-    this.log('El correo NO lo envía el navegador; lo envía la Cloud Function en Firebase (1–10 s después).');
     await this.audit('Post-creación ticket');
   }
 };
