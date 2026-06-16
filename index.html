@@ -1,3 +1,8 @@
+<!--
+  ARTURITO AI — Monolito único (todo el frontend en este archivo).
+  Carpeta functions/ = solo backend Firebase (correo al crear tickets).
+  Desplegar: bash deploy.sh (desde esta carpeta)
+-->
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -794,11 +799,11 @@ body.mode-client #adminApp{display:none!important}
 </script>
 
 <!-- ═══ GADGET ARTURITO (solo residentes) ═══ -->
-<div id="chatDock" class="chat-dock" aria-live="polite" aria-hidden="true">
-  <div id="chatBackdrop" class="chat-backdrop" title="Cerrar chat"></div>
+<div id="chatDock" class="chat-dock" aria-live="polite">
+  <div id="chatBackdrop" class="chat-backdrop" aria-hidden="true" title="Cerrar chat"></div>
   <div class="chat-stack">
     <div class="chat-flotante-wrap">
-    <div id="chatFlotante" class="chat-flotante" role="dialog" aria-labelledby="chatHeaderBuilding">
+    <div id="chatFlotante" class="chat-flotante" role="dialog" aria-modal="false" aria-labelledby="chatHeaderBuilding" aria-hidden="true">
       <div class="chat-cloud-glow" aria-hidden="true"></div>
       <div class="chat-header">
         <div class="chat-header-main">
@@ -1149,7 +1154,7 @@ body.mode-client #adminApp{display:none!important}
             <div class="form-group full"><label>O URI SMTP completa (opcional)</label><input type="password" id="setSmtpConnectionUri" autocomplete="off" placeholder="smtps://...@smtp.gmail.com:465"></div>
             <div class="form-group"><label>Modo de envío</label><select id="setTicketEmailMode"><option value="auto">Automático (SMTP del panel — recomendado)</option><option value="extension">Cola mail/ (processMailQueue)</option><option value="smtp">Solo SMTP del panel</option></select></div>
             <p id="smtpConfigStatus" class="ticket-hint" style="margin:0 0 .5rem"></p>
-            <p class="ticket-hint" style="margin:0 0 .75rem">Al crear ticket se escribe en <code>mail/</code>. La Cloud Function <strong>processMailQueue</strong> envía el correo por Gmail SMTP. Configura Gmail abajo o en <code>functions/.env</code> al desplegar.</p>
+            <p class="ticket-hint" style="margin:0 0 .75rem">Con Gmail configurado abajo, <strong>notifyAdminOnTicket</strong> envía al crear el ticket. Sin SMTP, la app encola en <code>mail/</code> y <strong>processMailQueue</strong> envía. Requiere <code>bash deploy.sh</code> en esta carpeta.</p>
             <div class="form-group full" style="display:flex;gap:.5rem;flex-wrap:wrap">
               <button type="button" class="btn btn-secondary btn-sm" id="btnVerifyTicketEmail">Verificar en consola</button>
               <button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar Configuración</button>
@@ -2769,7 +2774,7 @@ const ARTURITO_GADGET_KB_SEED = [
           mailId = await global.TicketEmailDebug?.queueMailForTicket?.(id, localTicket);
         } catch (err) {
           console.warn('[TicketEmail] queue mail/ desde app:', err);
-          global.toast?.('Ticket guardado. Falta publicar reglas mail/ → bash deploy-firebase.sh', 'warning');
+          global.toast?.('Ticket guardado. Falta publicar reglas mail/ → bash deploy.sh', 'warning');
         }
       } else {
         global.TicketEmailDebug?.log('SMTP en settings — notifyAdminOnTicket envía directo (despliega functions si no llega el correo)', {
@@ -2780,7 +2785,7 @@ const ARTURITO_GADGET_KB_SEED = [
       console.log('[TicketEmail] Ticket en Firestore', {
         ticketId: id,
         path: ticketPath,
-        mailId: mailId || '(no encolado — revisa reglas mail/ o TicketEmailDebug)',
+        mailId: mailId || (hasSmtp ? '(SMTP directo vía notifyAdminOnTicket)' : '(no encolado — revisa reglas mail/)'),
         categoria: data.categoria,
         adjuntos: (data.adjuntos || []).length
       });
@@ -3941,7 +3946,7 @@ const ARTURITO_GADGET_KB_SEED = [
           const msg = lastErr.message || String(lastErr);
           global.toast?.(
             msg.includes('permission') || msg.includes('PERMISSION_DENIED')
-              ? 'Sin permiso en Firestore (base artutitohipodromo02). Publica firestore.rules: bash deploy-firebase.sh'
+              ? 'Sin permiso en Firestore (base artutitohipodromo02). Publica firestore.rules: bash deploy.sh'
               : 'No se guardó en la nube. Revisa tu conexión e intenta de nuevo.',
             'error'
           );
@@ -6392,6 +6397,9 @@ const GadgetModule = {
   /** Abre o cierra el panel del chat con transición suave */
   toggle(open) {
     const dock = document.getElementById('chatDock');
+    const panel = document.getElementById('chatFlotante');
+    const backdrop = document.getElementById('chatBackdrop');
+    const fab = document.getElementById('chatFab');
     if (!dock) return;
     const isOpen = open !== undefined ? open : !dock.classList.contains('chat-open');
     if (dock.classList.contains('chat-animating') && isOpen === dock.classList.contains('chat-open')) return;
@@ -6402,7 +6410,9 @@ const GadgetModule = {
     if (isOpen) {
       dock.classList.remove('chat-closing');
       dock.classList.add('chat-animating', 'chat-opening', 'chat-open');
-      dock.setAttribute('aria-hidden', 'false');
+      panel?.setAttribute('aria-hidden', 'false');
+      panel?.setAttribute('aria-modal', 'true');
+      backdrop?.setAttribute('aria-hidden', 'false');
       clearTimeout(this._autoOpenTimer);
       if (!currentConversationId) ChatModule.startNewConversation();
       else ArturitoModule.onChatOpen();
@@ -6411,9 +6421,12 @@ const GadgetModule = {
       }, this.ANIM_MS + 60);
       setTimeout(() => document.getElementById('chatInput')?.focus(), this.ANIM_MS);
     } else {
+      if (panel?.contains(document.activeElement)) fab?.focus();
       dock.classList.add('chat-animating', 'chat-closing');
       dock.classList.remove('chat-open', 'chat-opening');
-      dock.setAttribute('aria-hidden', 'true');
+      panel?.setAttribute('aria-hidden', 'true');
+      panel?.removeAttribute('aria-modal');
+      backdrop?.setAttribute('aria-hidden', 'true');
       sessionStorage.setItem('arturito_chat_dismissed', '1');
       ArturitoModule.onChatClose();
       this._toggleAnimTimer = setTimeout(() => {
@@ -7808,7 +7821,7 @@ const TicketEmailDebug = {
         this.log('Envío vía mail/', 'processMailQueue (Cloud Function) lee SMTP de settings/main o functions/.env');
       }
       if (mode === 'auto' && hasSmtp) {
-        this.log('Envío vía SMTP directo', 'notifyAdminOnTicket al crear ticket (requiere: firebase deploy --only functions)');
+        this.log('Envío vía SMTP directo', 'notifyAdminOnTicket al crear ticket (requiere: bash deploy.sh)');
       }
       this.log('Config Firestore (settings/main)', {
         database: ArturitoCloud.fb?.getFirestoreDatabaseId?.() || 'artutitohipodromo02',
@@ -7819,18 +7832,18 @@ const TicketEmailDebug = {
         ticketEmailMode: mode
       });
       this.log('Cloud Function', {
-        processMailQueue: 'mail/{id} → envía SMTP directo (processMailQueue)',
-        notifyAdminOnTicket: 'tickets/{id} → respaldo',
+        notifyAdminOnTicket: hasSmtp ? 'tickets/{id} → SMTP directo (principal)' : 'tickets/{id} → encola mail/ si falta cola',
+        processMailQueue: 'mail/{id} → SMTP (respaldo sin SMTP en panel)',
         database: 'artutitohipodromo02',
-        logs: 'Firebase Console → Functions → processMailQueue → Logs',
-        smtp: 'functions/.env → SMTP_CONNECTION_URI o panel admin → Gmail + app password'
+        logs: 'Firebase Console → Functions → notifyAdminOnTicket / processMailQueue → Logs',
+        smtp: 'Panel admin → Gmail + app password, o functions/.env → SMTP_CONNECTION_URI'
       });
       if (issues.length) {
         issues.forEach((i) => this.warn('Problema detectado', i));
       } else {
         this.log('Checklist OK', hasSmtp
-          ? 'SMTP configurado → despliega functions y crea ticket. Revisa logs notifyAdminOnTicket.'
-          : 'Sin SMTP → mail/ + processMailQueue. Despliega: firebase deploy --only functions');
+          ? 'SMTP configurado → bash deploy.sh y crea ticket. Revisa logs notifyAdminOnTicket.'
+          : 'Sin SMTP → mail/ + processMailQueue. Despliega: bash deploy.sh');
       }
       return { ok: issues.length === 0, issues, settings: s };
     } catch (err) {
@@ -7955,7 +7968,7 @@ const TicketEmailDebug = {
             state: delivery.state,
             error: delivery.error || delivery.info || delivery
           });
-          this.warn('Solución', 'firebase deploy --only functions --project chatbots-hipodromo. Revisa SMTP en settings/main o functions/.env');
+          this.warn('Solución', 'bash deploy.sh — revisa SMTP en settings/main o functions/.env');
           return { ok: false, delivery };
         }
         if (delivery.state === 'PENDING' || delivery.state === 'PROCESSING') continue;
@@ -7966,7 +7979,7 @@ const TicketEmailDebug = {
           this.warn('Diagnóstico mail/ bloqueado por reglas', {
             mailId,
             database: dbId,
-            solucion: 'Publica firestore.rules en la base artutitohipodromo02 (no en default): firebase deploy --only firestore:rules'
+            solucion: 'Publica firestore.rules: bash deploy.sh (base artutitohipodromo02)'
           });
           this.log('El ticket SÍ se encoló en mail/. Revisa delivery en Firebase Console → Firestore → artutitohipodromo02 → mail/' + mailId);
           return { ok: false, permission: true };
@@ -7996,7 +8009,7 @@ const TicketEmailDebug = {
         : ticketId,
       solicitante: ticket?.email,
       categoria: ticket?.categoria,
-      deploy: hasSmtp ? 'firebase deploy --only functions --project chatbots-hipodromo' : 'mail/ + processMailQueue'
+      deploy: hasSmtp ? 'bash deploy.sh' : 'mail/ + processMailQueue → bash deploy.sh'
     });
     await this.audit('Post-creación ticket');
   }
@@ -10007,7 +10020,7 @@ const App = {
       } catch (err) {
         console.warn('[ArturitoCloud] init falló:', err);
         ArturitoCloud.UIManager.setCloudBadge(false, 'Error Firebase');
-        this.showCloudSyncLoading(true, 'Sin conexión a la nube', 'Publica firestore.rules en la base artutitohipodromo02 (bash deploy-firebase.sh) o revisa tu internet.');
+        this.showCloudSyncLoading(true, 'Sin conexión a la nube', 'Publica firestore.rules en la base artutitohipodromo02 (bash deploy.sh) o revisa tu internet.');
         await new Promise(r => setTimeout(r, 2200));
       }
     } else {
@@ -10022,7 +10035,7 @@ const App = {
       void TicketEmailDebug.audit('Al cargar la app');
     } else {
       this.showCloudSyncLoading(true, 'Conexión a la nube requerida',
-        'Todos los datos están en Firestore (artutitohipodromo02). Ejecuta bash deploy-firebase.sh, verifica internet y recarga.');
+        'Todos los datos están en Firestore (artutitohipodromo02). Ejecuta bash deploy.sh, verifica internet y recarga.');
       return;
     }
 
