@@ -7896,6 +7896,7 @@ const TicketEmailDebug = {
     const mailCol = collection(ArturitoCloud.fb.db, 'mail');
     const docRef = await addDoc(mailCol, {
       to: to.length === 1 ? to[0] : to,
+      replyTo: ticket.email || to[0],
       message: { subject: email.subject, html: email.html, text: email.text },
       meta: {
         tipo: 'ticket_created',
@@ -7912,7 +7913,53 @@ const TicketEmailDebug = {
       database: ArturitoCloud.fb.getFirestoreDatabaseId?.() || 'artutitohipodromo02',
       to: to.join(', ')
     });
+    void this.watchMailDelivery(docRef.id);
     return docRef.id;
+  },
+  /** Espera el campo delivery que escribe la extensión Trigger Email (diagnóstico SMTP) */
+  async watchMailDelivery(mailId, maxAttempts = 15) {
+    if (!mailId || typeof ArturitoCloud === 'undefined' || !ArturitoCloud.fb?.isEnabled()) return;
+    const { doc, getDoc } = ArturitoCloud.fb._modules;
+    const ref = doc(ArturitoCloud.fb.db, 'mail', mailId);
+    this.log('Esperando extensión Trigger Email…', { mailId, intentos: maxAttempts });
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const snap = await getDoc(ref);
+        if (!snap.exists()) continue;
+        const data = snap.data() || {};
+        const delivery = data.delivery;
+        if (!delivery) continue;
+        if (delivery.state === 'SUCCESS' || delivery.state === 'DELIVERED') {
+          this.log('✓ Correo enviado por extensión', { mailId, delivery });
+          return { ok: true, delivery };
+        }
+        if (delivery.state === 'ERROR' || delivery.state === 'FAILED' || delivery.error) {
+          this.warn('✗ Extensión no pudo enviar el correo', {
+            mailId,
+            state: delivery.state,
+            error: delivery.error || delivery.info || delivery
+          });
+          this.warn('Solución', 'Firebase Console → Extensions → Trigger Email → Reconfigure. SMTP_CONNECTION_URI debe ser Gmail + contraseña de app real (no TU_GMAIL). DATABASE=artutitohipodromo02.');
+          return { ok: false, delivery };
+        }
+        if (delivery.state === 'PENDING' || delivery.state === 'PROCESSING') continue;
+        this.log('Estado delivery', delivery);
+      } catch (err) {
+        this.warn('Error leyendo mail/' + mailId, err.message);
+        return { ok: false, error: err.message };
+      }
+    }
+    this.warn('Sin respuesta de la extensión en 30 s', {
+      mailId,
+      causas: [
+        'Extensión Trigger Email no instalada o inactiva',
+        'Extensión apunta a otra base de datos (debe ser artutitohipodromo02)',
+        'MAIL_COLLECTION distinto de "mail"',
+        'Revisa Firebase Console → Extensions → Logs'
+      ]
+    });
+    return { ok: false, timeout: true };
   },
   async afterTicketCreated(ticketId, ticket) {
     this.log('✓ Ticket creado — correo encolado en mail/ para Trigger Email', {
