@@ -617,7 +617,7 @@ const APP_VERSION = '2.0.0';
 const APP_BUILD = '2026-06-16';
 const APP_NAME = 'ARTURITO AI';
 const IDB_NAME = 'arturito_offline_v2';
-const IDB_VERSION = 1;
+const IDB_VERSION = 2;
 const RATE_LIMIT_MS = 800;
 const MAX_MSG_LEN = 4000;
 
@@ -799,6 +799,9 @@ const Database = {
       AppState.knowledge = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       IDB.putAll('knowledge', AppState.knowledge);
       callback(AppState.knowledge);
+    }, err => {
+      console.warn('[Database] knowledge sub:', err);
+      this.loadPublicData().then(() => callback(AppState.knowledge));
     });
   },
 
@@ -817,7 +820,13 @@ const Database = {
 
   async createTicket(data) {
     const now = Date.now();
-    const numero = await this.nextTicketNumber();
+    let numero;
+    try {
+      numero = await this.nextTicketNumber();
+    } catch (e) {
+      console.warn('[Database] nextTicketNumber:', e);
+      numero = 'TK-' + String(Date.now()).slice(-6);
+    }
     const ticket = {
       numeroTicket: numero,
       asunto: sanitize(data.asunto || 'Sin asunto'),
@@ -838,10 +847,19 @@ const Database = {
       createdAt: now,
       updatedAt: now
     };
-    const ref = await fb.addDoc(fb.collection(db, condoPath('tickets')), ticket);
-    await this.log('ticket_created', { ticketId: ref.id, numero });
-    await IDB.put('tickets', { id: ref.id, ...ticket });
-    return { id: ref.id, ...ticket };
+    try {
+      const ref = await fb.addDoc(fb.collection(db, condoPath('tickets')), ticket);
+      await this.log('ticket_created', { ticketId: ref.id, numero }).catch(() => {});
+      await IDB.put('tickets', { id: ref.id, ...ticket });
+      return { id: ref.id, ...ticket };
+    } catch (e) {
+      console.warn('[Database] createTicket cloud failed:', e);
+      const localId = 'local_' + Date.now();
+      const localTicket = { id: localId, ...ticket, numeroTicket: numero, pendingSync: true };
+      await IDB.put('tickets', localTicket);
+      if (navigator.onLine) await OfflineSync.enqueue({ type: 'ticket_create', data }).catch(() => {});
+      return localTicket;
+    }
   },
 
   async updateTicket(id, updates) {
@@ -897,15 +915,29 @@ const Database = {
 
   async saveMessage(convId, msg) {
     const data = { ...msg, conversationId: convId, createdAt: Date.now(), uid: Auth.user?.uid || 'guest' };
-    const ref = await fb.addDoc(fb.collection(db, condoPath('messages')), data);
-    await IDB.put('messages', { id: ref.id, ...data });
-    return ref.id;
+    try {
+      const ref = await fb.addDoc(fb.collection(db, condoPath('messages')), data);
+      await IDB.put('messages', { id: ref.id, ...data });
+      return ref.id;
+    } catch (e) {
+      console.warn('[Database] saveMessage offline:', e);
+      const localId = 'local_' + Date.now();
+      await IDB.put('messages', { id: localId, ...data });
+      if (navigator.onLine) await OfflineSync.enqueue({ type: 'message', conversationId: convId, data: msg }).catch(() => {});
+      return localId;
+    }
   },
 
   async getConversationMessages(convId) {
-    const q = fb.query(fb.collection(db, condoPath('messages')), fb.where('conversationId', '==', convId), fb.orderBy('createdAt', 'asc'));
-    const snap = await fb.getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    try {
+      const q = fb.query(fb.collection(db, condoPath('messages')), fb.where('conversationId', '==', convId), fb.orderBy('createdAt', 'asc'));
+      const snap = await fb.getDocs(q);
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch (e) {
+      console.warn('[Database] getConversationMessages:', e);
+      const local = (await IDB.getAll('messages')).filter(m => m.conversationId === convId);
+      return local.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    }
   },
 
   async log(type, meta = {}) {
@@ -916,9 +948,29 @@ const Database = {
 
   async loadOfflineCache() {
     AppState.tickets = await IDB.getAll('tickets') || [];
-    AppState.settings = await IDB.get('settings') || AppState.settings;
+    const cachedSettings = await IDB.get('settings');
+    if (cachedSettings) {
+      const { id: _id, ...settingsData } = cachedSettings;
+      AppState.settings = { ...AppState.settings, ...settingsData };
+    }
     AppState.knowledge = await IDB.getAll('knowledge') || [];
     AppState.messages = await IDB.getAll('messages') || [];
+  },
+
+  async loadPublicData() {
+    try {
+      await this.getSettings();
+      ColorUtils?.loadFromSettings?.();
+      Chatbot.renderQuickReplies?.();
+    } catch (e) { console.warn('[Database] settings:', e); }
+    try {
+      const snap = await fb.getDocs(fb.collection(db, condoPath('knowledge_base')));
+      AppState.knowledge = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      await IDB.putAll('knowledge', AppState.knowledge);
+    } catch (e) {
+      console.warn('[Database] knowledge:', e);
+      AppState.knowledge = await IDB.getAll('knowledge') || [];
+    }
   }
 };
 
@@ -957,7 +1009,7 @@ const IDB = {
       const req = indexedDB.open(IDB_NAME, IDB_VERSION);
       req.onupgradeneeded = e => {
         const d = e.target.result;
-        ['tickets', 'messages', 'settings', 'knowledge', 'pending_sync'].forEach(s => {
+        ['tickets', 'messages', 'settings', 'knowledge', 'pending_sync', 'users'].forEach(s => {
           if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id' });
         });
       };
@@ -1056,22 +1108,32 @@ const sanitize = Utils.sanitize.bind(Utils);
 function openModal(title, body, footer = '') {
   const overlay = Utils.$('#modal-overlay');
   Utils.$('#modal-content').innerHTML = `
-    <div class="modal-header"><h3>${escapeHtml(title)}</h3><button class="modal-close" onclick="UI.closeModal()">×</button></div>
+    <div class="modal-header"><h3>${escapeHtml(title)}</h3><button type="button" class="modal-close" id="modal-close-btn">×</button></div>
     <div class="modal-body">${body}</div>${footer ? `<div class="modal-footer" style="margin-top:1rem;display:flex;gap:.5rem;justify-content:flex-end">${footer}</div>` : ''}`;
   overlay.classList.add('show');
+  Utils.$('#modal-close-btn').onclick = closeModal;
+  overlay.onclick = e => { if (e.target === overlay) closeModal(); };
 }
-function closeModal() { Utils.$('#modal-overlay').classList.remove('show'); }
+function closeModal() {
+  const overlay = Utils.$('#modal-overlay');
+  overlay.classList.remove('show');
+  overlay.onclick = null;
+}
 
 /* CHATBOT */
 const Chatbot = {
   open: false,
   typing: false,
   conversationId: null,
+  _bound: false,
 
   init() {
     this.conversationId = localStorage.getItem('arturito_conv') || Utils.genId();
     localStorage.setItem('arturito_conv', this.conversationId);
-    this.bindEvents();
+    if (!this._bound) {
+      this.bindEvents();
+      this._bound = true;
+    }
     this.renderQuickReplies();
     this.renderEmojis();
     this.loadHistory();
@@ -1155,12 +1217,16 @@ const Chatbot = {
     if (!text) return;
     input.value = '';
     this.renderMessage('user', text);
-    await Database.saveMessage(this.conversationId, { role: 'user', text });
+    try { await Database.saveMessage(this.conversationId, { role: 'user', text }); } catch (_) {}
     this.showTyping(true);
-    const reply = await this.processMessage(text);
+    let reply;
+    try { reply = await this.processMessage(text); } catch (e) {
+      console.warn('[Chatbot] processMessage:', e);
+      reply = { text: 'Ocurrió un error al procesar tu mensaje. Intenta de nuevo.' };
+    }
     this.showTyping(false);
     this.renderMessage('bot', reply.text);
-    await Database.saveMessage(this.conversationId, { role: 'bot', text: reply.text, meta: reply.meta });
+    try { await Database.saveMessage(this.conversationId, { role: 'bot', text: reply.text, meta: reply.meta }); } catch (_) {}
     if (reply.actions?.length) this.renderActions(reply.actions);
   },
 
@@ -1364,6 +1430,8 @@ const Tickets = {
         }
         closeModal();
         Utils.toast('Ticket guardado', 'success');
+        this.refreshRows();
+        if (AppState.currentView === 'dashboard') Dashboard.render();
       } catch (e) { Utils.toast(e.message, 'error'); }
     };
   },
@@ -1385,9 +1453,26 @@ const Tickets = {
       `<button class="btn btn-secondary" onclick="UI.closeModal()">Cerrar</button>
        <button class="btn btn-primary" id="ticket-add-comment">Agregar comentario</button>
        <button class="btn btn-secondary" id="ticket-edit-btn">Editar</button>
+       ${t.estado === 'Cerrado' || t.estado === 'Resuelto'
+         ? '<button class="btn btn-secondary" id="ticket-reopen-btn">Reabrir</button>'
+         : '<button class="btn btn-secondary" id="ticket-close-btn">Cerrar ticket</button>'}
        <button class="btn btn-secondary" id="ticket-email-btn">Enviar email</button>`
     );
     Utils.$('#ticket-edit-btn').onclick = () => { closeModal(); this.showForm(t); };
+    Utils.$('#ticket-close-btn')?.addEventListener('click', async () => {
+      await Database.updateTicket(id, { estado: 'Cerrado' });
+      await Database.addTicketHistory(id, { autor: Auth.profile?.rol, nombre: Auth.profile?.nombre, mensaje: 'Ticket cerrado' });
+      Utils.toast('Ticket cerrado', 'success');
+      closeModal();
+      this.refreshRows();
+    });
+    Utils.$('#ticket-reopen-btn')?.addEventListener('click', async () => {
+      await Database.updateTicket(id, { estado: 'Abierto' });
+      await Database.addTicketHistory(id, { autor: Auth.profile?.rol, nombre: Auth.profile?.nombre, mensaje: 'Ticket reabierto' });
+      Utils.toast('Ticket reabierto', 'success');
+      closeModal();
+      this.refreshRows();
+    });
     Utils.$('#ticket-add-comment').onclick = async () => {
       const msg = sanitize(Utils.$('#ticket-comment').value);
       if (!msg) return;
@@ -1494,8 +1579,9 @@ const Training = {
     const ext = file.name.split('.').pop().toLowerCase();
     if (ext === 'txt' || ext === 'csv') return await file.text();
     if (ext === 'pdf') {
-      const pdfjs = window['pdfjs-dist/build/pdf'] || window.pdfjsLib;
-      if (pdfjs?.GlobalWorkerOptions) pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      const pdfjs = window.pdfjsLib;
+      if (!pdfjs?.getDocument) throw new Error('PDF.js no cargó. Recarga la página e intenta de nuevo.');
+      if (pdfjs.GlobalWorkerOptions) pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
       const buf = await file.arrayBuffer();
       const pdf = await pdfjs.getDocument({ data: buf }).promise;
       let text = '';
@@ -1626,7 +1712,7 @@ const Dashboard = {
     AppState.charts = {};
     const t = AppState.tickets;
     const monthMap = {};
-    t.forEach tk => { const m = new Date(tk.createdAt).toLocaleString('es', { month: 'short', year: '2-digit' }); monthMap[m] = (monthMap[m] || 0) + 1; });
+    t.forEach(tk => { const m = new Date(tk.createdAt).toLocaleString('es', { month: 'short', year: '2-digit' }); monthMap[m] = (monthMap[m] || 0) + 1; });
     AppState.charts.month = new Chart(Utils.$('#chart-month'), { type: 'bar', data: { labels: Object.keys(monthMap), datasets: [{ label: 'Tickets', data: Object.values(monthMap), backgroundColor: '#7FBA02' }] }, options: { responsive: true, plugins: { legend: { display: false } } } });
     const catMap = {};
     t.forEach(tk => { catMap[tk.categoria] = (catMap[tk.categoria] || 0) + 1; });
@@ -1864,12 +1950,14 @@ const UI = {
   initTheme() {
     const saved = localStorage.getItem('arturito_theme') || 'light';
     document.documentElement.setAttribute('data-theme', saved);
-    Utils.$('#theme-toggle').textContent = saved === 'dark' ? '☀️' : '🌙';
-    Utils.$('#theme-toggle').onclick = () => {
+    const toggle = Utils.$('#theme-toggle');
+    if (!toggle) return;
+    toggle.textContent = saved === 'dark' ? '☀️' : '🌙';
+    toggle.onclick = () => {
       const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
       document.documentElement.setAttribute('data-theme', next);
       localStorage.setItem('arturito_theme', next);
-      Utils.$('#theme-toggle').textContent = next === 'dark' ? '☀️' : '🌙';
+      toggle.textContent = next === 'dark' ? '☀️' : '🌙';
     };
   },
 
@@ -1937,7 +2025,10 @@ const UI = {
           await Auth.register(Utils.$('#auth-name').value, email, password, Utils.$('#auth-unit').value);
         }
         if (Auth.isStaff()) UI.showAdmin();
-        else { UI.showResident(); Chatbot.toggle(true); }
+        else {
+          Utils.toast('Tu cuenta no tiene acceso al panel admin. Entrando al portal residente.', 'info');
+          UI.showResident();
+        }
       } catch (err) { Utils.toast(err.message || 'Error de autenticación', 'error'); }
     };
     Utils.$('#btn-logout').onclick = async () => { await Auth.logout(); UI.showAuth(); };
@@ -1948,7 +2039,12 @@ const UI = {
         Utils.toast('Revisa tu correo para restablecer la contraseña', 'success');
       } catch (err) { Utils.toast(err.message || 'No se pudo enviar el correo', 'error'); }
     };
-    Utils.$('#btn-resident-portal').onclick = () => { UI.showResident(); Chatbot.init(); Chatbot.toggle(true); };
+    Utils.$('#btn-resident-portal').onclick = async () => {
+      await Database.loadPublicData();
+      UI.showResident();
+      Chatbot.init();
+      Chatbot.toggle(true);
+    };
     Utils.$('#btn-admin-login').onclick = () => UI.showAuth();
     Utils.$('#mobile-menu-btn').onclick = () => Utils.$('#sidebar').classList.toggle('open');
   },
@@ -2046,10 +2142,11 @@ const OfflineSync = {
         else if (op.type === 'message') await Database.saveMessage(op.conversationId, op.data);
         else if (op.type === 'settings') await Database.saveSettings(op.data);
         this.queue = this.queue.filter(q => q.id !== op.id);
-        await IDB.put('pending_sync', { ...op, synced: true });
+        try { await IDB.put('pending_sync', { ...op, synced: true }); } catch (_) {}
       } catch (e) { console.warn('Sync pending failed:', op.type, e); break; }
     }
-    Utils.toast(`Sincronizados ${pending.length - this.queue.length} cambios`, 'success');
+    const synced = pending.length - this.queue.length;
+    if (synced > 0) Utils.toast(`Sincronizados ${synced} cambios`, 'success');
   },
 
   async syncFromFirestore() {
@@ -2156,7 +2253,6 @@ Chatbot.ticketFlow = null;
 
 Chatbot.startTicketFlow = function () {
   this.ticketFlow = { step: 0, data: { origen: 'chatbot' } };
-  this.addBotMessage('Vamos a crear tu solicitud. ¿Cuál es el **asunto** de tu consulta?');
 };
 
 Chatbot.processTicketFlow = async function (text) {
@@ -2191,7 +2287,9 @@ Chatbot.processTicketFlow = async function (text) {
         ? await Database.createTicket(flow.data)
         : await OfflineSync.enqueue({ type: 'ticket_create', data: flow.data }).then(() => ({ numeroTicket: 'Pendiente sync' }));
       this.ticketFlow = null;
-      await Notifications.push({ titulo: 'Nuevo ticket', mensaje: flow.data.asunto, tipo: 'ticket', ticketId: ticket.id });
+      try {
+        await Notifications.push({ titulo: 'Nuevo ticket', mensaje: flow.data.asunto, tipo: 'ticket', ticketId: ticket.id || ticket.numeroTicket });
+      } catch (_) {}
       return { text: `✅ Solicitud creada: **${ticket.numeroTicket}**\n\nEl equipo la revisará pronto. ¿Necesitas algo más?` };
     } catch (e) {
       this.ticketFlow = null;
@@ -2327,10 +2425,12 @@ Settings.render = function () {
 /* Bootstrap extension */
 async function bootstrap() {
   try {
+    window.UI = UI;
     UI.initTheme();
     await IDB.open();
     await initFirebase();
     await Database.loadOfflineCache();
+    await Database.loadPublicData();
     await OfflineSync.init();
     Chatbot.init();
     UI.bindAuth();
@@ -3017,6 +3117,7 @@ document.addEventListener('keydown', e => {
 /* PWA — Service Worker embebido */
 function registerArturitoServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
+  if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') return;
   const scope = location.pathname.replace(/[^/]*$/, '') || '/';
   const swCode = [
     "const CACHE='arturito-ai-v2';",
