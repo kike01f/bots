@@ -291,7 +291,7 @@ tr:hover td{background:color-mix(in srgb,var(--primary) 4%,transparent)}
 .nav-item .icon{font-size:1rem;display:flex;align-items:center;justify-content:center}
 /* Topbar sync indicator pulse */
 #sync-status.badge-info{animation:pulse-badge 2s ease-in-out infinite}
-@keyframes pulse-badge{0%,100%{opacity:1}50%{opacity:.7}
+@keyframes pulse-badge{0%,100%{opacity:1}50%{opacity:.7}}
 /* Stat card hover glow */
 .stat-card{transition:transform .2s,box-shadow .2s}
 .stat-card:hover{transform:translateY(-3px);box-shadow:0 8px 24px rgba(127,186,2,.12)}
@@ -323,12 +323,12 @@ table td small{color:var(--text-muted);font-size:.75rem}
 /* Toast variants animation */
 .toast{transform-origin:right center}
 .toast.removing{animation:slideOut .25s ease forwards}
-@keyframes slideOut{to{opacity:0;transform:translateX(30px)}
+@keyframes slideOut{to{opacity:0;transform:translateX(30px)}}
 /* Chat enhancements */
 .chat-messages::-webkit-scrollbar{width:6px}
 .chat-panel{border:1px solid rgba(127,186,2,.2)}
 .chat-header-info span::before{content:'';display:inline-block;width:6px;height:6px;background:#4ade80;border-radius:50%;margin-right:4px;animation:pulse-dot 2s infinite}
-@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.5}
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.5}}
 .chat-msg-attachment{display:flex;align-items:center;gap:.5rem;padding:.4rem;background:rgba(0,0,0,.04);border-radius:8px;margin-top:.35rem;font-size:.78rem}
 .chat-msg-attachment img{max-width:120px;border-radius:6px}
 /* Resident portal gradient */
@@ -389,13 +389,13 @@ tr[data-priority="Alta"] td{background:color-mix(in srgb,var(--warning) 4%,trans
 /* Arturito brand header stripe */
 .topbar::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--primary),transparent);opacity:.5}
 /* Print ticket */
-@media print{.view:not(.active){display:none}.card{break-inside:avoid;box-shadow:none;border:1px solid #ccc}
+@media print{.view:not(.active){display:none}.card{break-inside:avoid;box-shadow:none;border:1px solid #ccc}}
 /* High contrast mode support */
-@media(prefers-contrast:high){:root{--border:rgba(0,0,0,.5)}[data-theme="dark"]{--border:rgba(255,255,255,.5)}
+@media(prefers-contrast:high){:root{--border:rgba(0,0,0,.5)}[data-theme="dark"]{--border:rgba(255,255,255,.5)}}
 /* Large screens */
-@media(min-width:1400px){.content{max-width:1400px;margin:0 auto}.charts-grid{grid-template-columns:repeat(2,1fr)}
+@media(min-width:1400px){.content{max-width:1400px;margin:0 auto}.charts-grid{grid-template-columns:repeat(2,1fr)}}
 /* Chat full screen mobile */
-@media(max-width:600px){.chat-dock.open{position:fixed;inset:0;right:0;bottom:0;display:flex;flex-direction:column-reverse;align-items:stretch;padding:0}.chat-dock.open .chat-panel{width:100%;height:100%;max-height:none;border-radius:0;margin:0}.chat-dock.open .chat-fab{display:none}
+@media(max-width:600px){.chat-dock.open{position:fixed;inset:0;right:0;bottom:0;display:flex;flex-direction:column-reverse;align-items:stretch;padding:0}.chat-dock.open .chat-panel{width:100%;height:100%;max-height:none;border-radius:0;margin:0}.chat-dock.open .chat-fab{display:none}}
 /* Admin app hidden states */
 #admin-app:not(.hidden){display:flex;width:100%}
 #admin-app.hidden{display:none!important}
@@ -403,7 +403,7 @@ tr[data-priority="Alta"] td{background:color-mix(in srgb,var(--warning) 4%,trans
 #auth-screen:not(.hidden){display:flex}
 /* Focus trap for modal accessibility */
 .modal-overlay.show .modal{animation:modalIn .25s ease}
-@keyframes modalIn{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}
+@keyframes modalIn{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
 /* Spinner inline */
 .spinner-inline{display:inline-block;width:16px;height:16px;border:2px solid rgba(127,186,2,.3);border-top-color:var(--primary);border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:.35rem}
 /* Hover card actions */
@@ -457,7 +457,7 @@ input[type=file]{font-size:.82rem;padding:.45rem}
 .btn-primary:focus-visible{outline:2px solid var(--primary-dark);outline-offset:2px}
 .nav-item:focus-visible{outline:2px solid rgba(127,186,2,.6);outline-offset:-2px}
 .card:focus-within{border-color:color-mix(in srgb,var(--primary) 40%,var(--border))}
-#chat-messages .msg bot a{color:var(--arturito-green-dark);font-weight:600}
+#chat-messages .msg.bot a{color:var(--arturito-green-dark);font-weight:600}
 #chat-messages .msg.user a{color:#fff}
 .topbar h2::before{content:'';display:inline-block;width:8px;height:8px;background:var(--primary);border-radius:2px;margin-right:.5rem;vertical-align:middle}
 .sidebar-footer .btn-logout{margin-left:auto}
@@ -488,7 +488,7 @@ html[data-theme="dark"] .resident-portal .tagline{color:#64748b}
       <button type="button" id="tab-register">Registrarse</button>
     </div>
     <form id="auth-form">
-      <div class="form-group" style="margin-bottom:.75rem"><label>Nombre</label><input id="auth-name" type="text" placeholder="Tu nombre" autocomplete="name"></div>
+      <div class="form-group hidden" id="auth-name-group" style="margin-bottom:.75rem"><label>Nombre</label><input id="auth-name" type="text" placeholder="Tu nombre" autocomplete="name"></div>
       <div class="form-group" style="margin-bottom:.75rem"><label>Correo</label><input id="auth-email" type="email" required placeholder="correo@ejemplo.cl" autocomplete="email"></div>
       <div class="form-group" style="margin-bottom:1rem"><label>Contraseña</label><input id="auth-password" type="password" required minlength="6" autocomplete="current-password"></div>
       <div class="form-group hidden" id="auth-unit-group" style="margin-bottom:1rem"><label>Departamento / Unidad</label><input id="auth-unit" type="text" placeholder="Ej: 1204"></div>
@@ -598,7 +598,7 @@ exports.sendTicketEmail = onCall({ region: 'us-central1' }, async (request) => {
   await db.collection(`condominios/${condominioId}/logs`).add({ type: 'email_sent', ticketId, to, subject, resendId: result.id, uid: request.auth.uid, createdAt: now });
   return { ok: true, id: result.id };
 });</script>
-<script type="module">/* ═══════════════════════════════════════════════════════════════
+<script defer>/* ═══════════════════════════════════════════════════════════════
    ARTURITO AI — Plataforma SaaS Monolítica
    ═══════════════════════════════════════════════════════════════ */
 
@@ -959,9 +959,13 @@ const Database = {
 
   async loadPublicData() {
     try {
-      await this.getSettings();
-      ColorUtils?.loadFromSettings?.();
-      Chatbot.renderQuickReplies?.();
+      const snap = await fb.getDoc(fb.doc(db, `${condoPath('settings')}/main`));
+      if (snap.exists()) {
+        AppState.settings = { ...AppState.settings, ...snap.data() };
+      } else if (!AppState.settings?.branding) {
+        AppState.settings = { branding: { name: 'ARTURITO AI', color: '#7FBA02' }, quickReplies: [...QUICK_REPLIES] };
+      }
+      await IDB.put('settings', AppState.settings);
     } catch (e) { console.warn('[Database] settings:', e); }
     try {
       const snap = await fb.getDocs(fb.collection(db, condoPath('knowledge_base')));
@@ -971,6 +975,7 @@ const Database = {
       console.warn('[Database] knowledge:', e);
       AppState.knowledge = await IDB.getAll('knowledge') || [];
     }
+    try { Chatbot.renderQuickReplies?.(); } catch (_) {}
   }
 };
 
@@ -2012,8 +2017,20 @@ const UI = {
 
   bindAuth() {
     let mode = 'login';
-    Utils.$('#tab-login').onclick = () => { mode = 'login'; Utils.$('#tab-login').classList.add('active'); Utils.$('#tab-register').classList.remove('active'); Utils.$('#auth-unit-group').classList.add('hidden'); };
-    Utils.$('#tab-register').onclick = () => { mode = 'register'; Utils.$('#tab-register').classList.add('active'); Utils.$('#tab-login').classList.remove('active'); Utils.$('#auth-unit-group').classList.remove('hidden'); };
+    Utils.$('#tab-login').onclick = () => {
+      mode = 'login';
+      Utils.$('#tab-login').classList.add('active');
+      Utils.$('#tab-register').classList.remove('active');
+      Utils.$('#auth-name-group').classList.add('hidden');
+      Utils.$('#auth-unit-group').classList.add('hidden');
+    };
+    Utils.$('#tab-register').onclick = () => {
+      mode = 'register';
+      Utils.$('#tab-register').classList.add('active');
+      Utils.$('#tab-login').classList.remove('active');
+      Utils.$('#auth-name-group').classList.remove('hidden');
+      Utils.$('#auth-unit-group').classList.remove('hidden');
+    };
     Utils.$('#auth-form').onsubmit = async e => {
       e.preventDefault();
       const email = Utils.$('#auth-email').value;
@@ -2040,7 +2057,9 @@ const UI = {
       } catch (err) { Utils.toast(err.message || 'No se pudo enviar el correo', 'error'); }
     };
     Utils.$('#btn-resident-portal').onclick = async () => {
-      await Database.loadPublicData();
+      if (auth && db) {
+        try { await Database.loadPublicData(); } catch (_) {}
+      }
       UI.showResident();
       Chatbot.init();
       Chatbot.toggle(true);
@@ -2422,39 +2441,64 @@ Settings.render = function () {
   });
 };
 
-/* Bootstrap extension */
+/* Bootstrap — arranque resiliente de la aplicación */
 async function bootstrap() {
-  try {
-    window.UI = UI;
-    UI.initTheme();
-    await IDB.open();
-    await initFirebase();
-    await Database.loadOfflineCache();
-    await Database.loadPublicData();
-    await OfflineSync.init();
-    Chatbot.init();
-    UI.bindAuth();
-    UI.setupConnectivity();
+  window.UI = UI;
+  UI.initTheme();
 
+  try { await IDB.open(); } catch (e) { console.warn('[IDB]', e); }
+
+  let firebaseOk = false;
+  try {
+    await initFirebase();
+    firebaseOk = true;
+  } catch (e) {
+    console.warn('[Firebase] init:', e);
+    Utils.toast('Sin conexión Firebase. Modo limitado (datos locales).', 'error');
+  }
+
+  try { await Database.loadOfflineCache(); } catch (e) { console.warn('[IDB] cache:', e); }
+
+  if (firebaseOk) {
+    try { await Database.loadPublicData(); } catch (e) { console.warn('[Database] public:', e); }
+    try { await OfflineSync.init(); } catch (e) { console.warn('[OfflineSync]', e); }
+  }
+
+  Chatbot.init();
+  UI.bindAuth();
+  UI.setupConnectivity();
+
+  if (firebaseOk && auth) {
     fb.onAuthStateChanged(auth, async user => {
-      if (user) {
-        Auth.user = user;
-        await Auth.loadProfile(user.uid);
-        await Database.getSettings();
-        if (Auth.isStaff()) {
-          UI.showAdmin();
-          UI.startSubscriptions();
+      try {
+        if (user) {
+          Auth.user = user;
+          await Auth.loadProfile(user.uid);
+          await Database.getSettings();
+          if (Auth.isStaff()) {
+            UI.showAdmin();
+            UI.startSubscriptions();
+          } else {
+            UI.showResident();
+          }
         } else {
-          UI.showResident();
+          UI.showAuth();
         }
-      } else {
+      } catch (e) {
+        console.error('[Auth] state:', e);
+        Utils.toast('Error de sesión: ' + e.message, 'error');
         UI.showAuth();
       }
     });
-  } catch (err) {
-    console.error('Bootstrap error:', err);
-    Utils.toast('Error al iniciar: ' + err.message, 'error');
+  } else {
+    UI.showAuth();
   }
+
+  try {
+    if (typeof ColorUtils !== 'undefined') ColorUtils.loadFromSettings();
+    if (typeof Branding !== 'undefined') Branding.apply(AppState.settings);
+  } catch (_) {}
+  console.info('[ARTURITO] App lista. Firebase:', firebaseOk);
 }
 
 
@@ -2844,13 +2888,6 @@ const HealthCheck = {
   }
 };
 
-const _bootstrapFinal = bootstrap;
-bootstrap = async function () {
-  await _bootstrapFinal();
-  await HealthCheck.run();
-  Branding.apply(AppState.settings);
-};
-
 window.DeploymentGuide = DeploymentGuide;
 window.ChatAnalytics = ChatAnalytics;
 
@@ -3134,6 +3171,22 @@ registerArturitoServiceWorker();
 performance.mark && performance.mark('arturito-app-ready');
 
 window.UI = UI;
-bootstrap();</script>
+window.addEventListener('error', e => console.error('[ARTURITO]', e.message, e.filename, e.lineno));
+window.addEventListener('unhandledrejection', e => console.error('[ARTURITO] Promise:', e.reason));
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => bootstrap().then(() => HealthCheck.run()).catch(e => {
+    console.error('Bootstrap fatal:', e);
+    Utils.toast('Error crítico al iniciar: ' + (e.message || e), 'error');
+    UI.showAuth();
+  }));
+} else {
+  bootstrap().then(() => HealthCheck.run()).catch(e => {
+    console.error('Bootstrap fatal:', e);
+    Utils.toast('Error crítico al iniciar: ' + (e.message || e), 'error');
+    UI.showAuth();
+  });
+}
+</script>
 </body>
 </html>
