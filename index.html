@@ -2895,21 +2895,7 @@ const ARTURITO_GADGET_KB_SEED = [
         return res.data?.numeroTicket || res.data?.numero;
       } catch (err) {
         console.warn('[CloudTicket] allocateNumber:', err);
-        throw new Error('No se pudo generar número de ticket. Verifica Cloud Functions desplegadas.');
-      }
-    }
-
-    /** Sincroniza contador con tickets existentes (una vez por sesión admin) */
-    _counterSynced = false;
-    async syncCounterIfNeeded(force = false) {
-      if (!this.fb.isEnabled() || !this.fb.auth?.currentUser) return;
-      if (this._counterSynced && !force) return;
-      try {
-        const fn = this._callable('syncTicketCounter');
-        await fn({ condominioId: this.fb.getCondominioId() });
-        this._counterSynced = true;
-      } catch (err) {
-        console.warn('[CloudTicket] syncCounter:', err);
+        throw new Error('No se pudo generar número de ticket. Despliega functions: firebase deploy --only functions');
       }
     }
   }
@@ -3801,7 +3787,6 @@ const ARTURITO_GADGET_KB_SEED = [
         (snap) => {
           database.tickets = snap.docs.map((d) => this.tickets.mapToLocal(d.data(), d.id));
           this._cacheLocal(database);
-          void this.tickets.syncCounterIfNeeded();
           if (onUpdate) onUpdate('tickets');
         },
         this._snapErr('tickets')
