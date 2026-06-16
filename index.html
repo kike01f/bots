@@ -1199,6 +1199,22 @@ body.mode-client #adminApp{display:none!important}
               </div>
             </form>
           </div>
+          <div class="email-config-card" id="knowledgeRecoveryCard">
+            <h3>Recuperación de conocimiento</h3>
+            <p>Firestore es la fuente de verdad. Si el panel no muestra tus ediciones, descarga desde la nube o restaura un respaldo automático (se crea antes de cada reemplazo masivo).</p>
+            <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem">
+              <button type="button" class="btn btn-primary btn-sm" id="btnPullKnowledgeCloud"><span data-icon="restore" data-icon-size="sm"></span> Descargar desde nube</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnListKnowledgeBackups"><span data-icon="backup" data-icon-size="sm"></span> Ver respaldos</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnRestoreLatestBackup">Restaurar último respaldo</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnCreateKnowledgeBackup">Crear respaldo ahora</button>
+            </div>
+            <div id="knowledgeRecoveryStatus" style="font-size:.78rem;color:var(--text-muted);margin-bottom:.5rem"></div>
+            <details style="font-size:.78rem;color:var(--text-muted)">
+              <summary style="cursor:pointer;color:var(--primary);font-weight:600">¿Perdiste ediciones? Recuperación en Firebase Console</summary>
+              <p style="margin-top:.5rem">Si no hay respaldo automático, usa <strong>Point-in-time recovery</strong> en Firebase Console → Firestore → pestaña <em>Disaster Recovery</em>. Restaura a un momento <strong>antes del 16-jun-2026 ~12:30 (Chile)</strong>, cuando aún existían tus cambios.</p>
+              <p>También puedes importar un archivo JSON exportado previamente (botón Backup en el menú lateral).</p>
+            </details>
+          </div>
           <div class="settings-preview" id="settingsPreview"></div>
           <div class="settings-preview" id="portalPreview" style="margin-top:.75rem;flex-direction:column;align-items:stretch;text-align:center"></div>
           <div class="email-config-card">
@@ -3375,12 +3391,76 @@ const ARTURITO_GADGET_KB_SEED = [
       database.knowledge = manual.concat(synced).sort((a, b) => (a.order ?? 9999) - (b.order ?? 9999));
     }
 
-    async syncCollectionReplace(collection, items, mapFn, idFn) {
+    /** Copia gadget_kb + knowledge_base antes de operaciones destructivas */
+    async createKnowledgeBackup(reason = 'auto') {
+      if (!this.fb.isEnabled()) return null;
+      const { getDocs, setDoc } = this.fb._modules;
+      const [gadgetSnap, manualSnap] = await Promise.all([
+        getDocs(this.fb.col('gadget_kb')),
+        getDocs(this.fb.col('knowledge_base'))
+      ]);
+      const gadget_kb = gadgetSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const knowledge_base = manualSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      if (!gadget_kb.length && !knowledge_base.length) return null;
+      const backupId = `bk_${Date.now()}`;
+      await setDoc(this.fb.doc(`condominios/${this._cid()}/knowledge_backups/${backupId}`), {
+        createdAt: Date.now(),
+        reason: String(reason || 'auto'),
+        gadgetCount: gadget_kb.length,
+        manualCount: knowledge_base.length,
+        gadget_kb,
+        knowledge_base
+      });
+      console.info('[CloudSync] backup creado:', backupId, gadget_kb.length, 'gadget', knowledge_base.length, 'manual');
+      return backupId;
+    }
+
+    async listKnowledgeBackups(limitN = 15) {
+      if (!this.fb.isEnabled()) return [];
+      const { getDocs } = this.fb._modules;
+      const snap = await getDocs(this.fb.col('knowledge_backups'));
+      return snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+        .slice(0, limitN)
+        .map(({ id, createdAt, reason, gadgetCount, manualCount }) => ({
+          id, createdAt, reason, gadgetCount, manualCount
+        }));
+    }
+
+    async restoreKnowledgeBackup(backupId, database) {
+      if (!this.fb.isEnabled()) throw new Error('Firebase no conectado');
+      const { getDoc } = this.fb._modules;
+      const snap = await getDoc(this.fb.doc(`condominios/${this._cid()}/knowledge_backups/${backupId}`));
+      if (!snap.exists()) throw new Error('Respaldo no encontrado: ' + backupId);
+      await this.createKnowledgeBackup('before_restore');
+      const data = snap.data();
+      const gadgetItems = (data.gadget_kb || []).map((item) => ({ ...item, id: item.id || item.key }));
+      const manualItems = (data.knowledge_base || []).map((d) => this.mapManualFromCloud(d.id, d));
+      database.gadgetKB = gadgetItems.sort((a, b) => (a.order || 0) - (b.order || 0));
+      database.manualKnowledge = manualItems;
+      this._cloudKBActive = true;
+      this.applyUnifiedKnowledge(database);
+      await this.pushGadgetKB(database.gadgetKB, { fullSync: true, skipBackup: true });
+      await this.pushManualKnowledge(database.manualKnowledge, { fullSync: true, skipBackup: true });
+      return { gadget: gadgetItems.length, manual: manualItems.length };
+    }
+
+    async forcePullKnowledgeFromCloud(database) {
+      this._recentPushIds.clear();
+      this._recentDeleteIds.clear();
+      return this.pullPublicCloudData(database, true);
+    }
+
+    async syncCollectionReplace(collection, items, mapFn, idFn, options = {}) {
       if (!this.fb.isEnabled()) return;
       const { getDocs, writeBatch, doc } = this.fb._modules;
       const cid = this._cid();
       const list = items || [];
       const snap = await getDocs(this.fb.col(collection));
+      if (snap.docs.length && !options.skipBackup) {
+        await this.createKnowledgeBackup(`fullSync:${collection}`);
+      }
       const keepIds = new Set(list.map((item, i) => idFn(item, i)));
       const toDelete = snap.docs.filter((d) => !keepIds.has(d.id));
       for (let i = 0; i < toDelete.length; i += 400) {
@@ -3678,7 +3758,8 @@ const ARTURITO_GADGET_KB_SEED = [
           'gadget_kb',
           list,
           (e) => ({ ...e, updatedAt: Date.now() }),
-          (e) => e.id || e.key
+          (e) => e.id || e.key,
+          { skipBackup: options.skipBackup }
         );
         this._markPushed(list.map((e) => e.id || e.key));
         this._cloudKBActive = true;
@@ -3711,7 +3792,8 @@ const ARTURITO_GADGET_KB_SEED = [
           'knowledge_base',
           manual,
           (k) => this.mapManualToCloud(k),
-          (k) => k.id
+          (k) => k.id,
+          { skipBackup: options.skipBackup }
         );
         this._markPushed(manual.map((k) => k.id));
         this._cloudKBActive = true;
@@ -3745,6 +3827,10 @@ const ARTURITO_GADGET_KB_SEED = [
 
     async migrateLocalToCloud(database) {
       if (!this.fb.isEnabled()) return { ok: false };
+      const counts = await this.getCloudCounts();
+      if (counts.gadgetKB > 0 || counts.manualKB > 0) {
+        await this.createKnowledgeBackup('before_migrate');
+      }
       await this.ensureCondominioDoc(database.settings?.buildingName);
       await this.syncSettings(database.settings);
 
@@ -4029,27 +4115,21 @@ const ARTURITO_GADGET_KB_SEED = [
       let migrated = false;
       await this.sync.pullPublicCloudData(database, true);
 
-      if (!(database.gadgetKB?.length) && global.DatabaseModule?.seedGadgetTemplate?.()) {
-        try {
-          await this.sync.pushGadgetKB(database.gadgetKB, { fullSync: true });
-          this.sync._cloudKBActive = true;
-        } catch (err) {
-          console.warn('[DataStore] seed gadget_kb:', err);
+      const cloudCounts = await this.sync.getCloudCounts();
+      if (cloudCounts.gadgetKB === 0 && cloudCounts.manualKB === 0) {
+        if (global.DatabaseModule?.seedGadgetTemplate?.()) {
+          this.sync.applyUnifiedKnowledge(database);
+          console.warn('[DataStore] Firestore sin conocimiento — plantilla cargada solo en memoria. No se sobrescribe la nube automáticamente.');
         }
-        this.sync.applyUnifiedKnowledge(database);
       }
+
       if (global.DatabaseModule?.repairEmptySettings) {
         global.DatabaseModule.repairEmptySettings();
-        try {
-          await this.sync.syncSettings(database.settings);
-        } catch (err) {
-          console.warn('[DataStore] repair settings:', err);
-        }
       }
 
       const cloudEmpty = !this.sync._cloudSettingsActive && !this.sync._cloudKBActive;
 
-      if (cloudEmpty) {
+      if (cloudEmpty && cloudCounts.gadgetKB === 0 && cloudCounts.manualKB === 0) {
         try {
           if (global.DatabaseModule?.seedGadgetTemplate) global.DatabaseModule.seedGadgetTemplate();
           await this.sync.ensureCondominioDoc(database.settings?.buildingName);
@@ -4072,7 +4152,34 @@ const ARTURITO_GADGET_KB_SEED = [
     }
 
     async forceMigrate(database) {
+      const counts = await this.sync.getCloudCounts();
+      if (counts.gadgetKB > 0 || counts.manualKB > 0) {
+        const ok = global.confirm?.(
+          `La nube ya tiene ${counts.gadgetKB} temas Gadget y ${counts.manualKB} manuales.\n\n` +
+          '¿Reemplazar TODO con los datos actuales del panel? Se creará un respaldo automático antes.'
+        );
+        if (!ok) return { ok: false, cancelled: true };
+      }
       return this.sync.migrateLocalToCloud(database);
+    }
+
+    async pullKnowledgeFromCloud(database) {
+      if (!this.fb.isEnabled()) throw new Error('Firebase no conectado');
+      const changes = await this.sync.forcePullKnowledgeFromCloud(database);
+      this.sync.applyUnifiedKnowledge(database);
+      return changes;
+    }
+
+    async listKnowledgeBackups() {
+      return this.sync.listKnowledgeBackups();
+    }
+
+    async createKnowledgeBackup(reason = 'manual') {
+      return this.sync.createKnowledgeBackup(reason);
+    }
+
+    async restoreKnowledgeBackup(backupId, database) {
+      return this.sync.restoreKnowledgeBackup(backupId, database);
     }
 
     /** Refresca settings/KB desde servidor (p. ej. al volver a la app o reconectar red) */
@@ -4159,10 +4266,114 @@ const ARTURITO_GADGET_KB_SEED = [
       document.getElementById('btnMigrateCloud')?.addEventListener('click', async () => {
         if (!global.database || !global.ArturitoCloud?.store) return;
         try {
-          await global.ArturitoCloud.store.forceMigrate(global.database);
-          global.toast?.('Conocimiento y datos locales sincronizados con la nube', 'success');
+          const res = await global.ArturitoCloud.store.forceMigrate(global.database);
+          if (res?.cancelled) {
+            global.toast?.('Migración cancelada', 'info');
+            return;
+          }
+          if (res?.ok) {
+            await global.RAGModule?.rebuildIndex?.();
+            global.App?.refresh?.();
+          }
+          global.toast?.('Conocimiento sincronizado con la nube', 'success');
         } catch (err) {
           global.toast?.('Error migración: ' + err.message, 'error');
+        }
+      });
+
+      const setRecoveryStatus = (msg, ok) => {
+        const el = document.getElementById('knowledgeRecoveryStatus');
+        if (el) {
+          el.textContent = msg;
+          el.style.color = ok ? 'var(--success)' : ok === false ? '#ef4444' : 'var(--text-muted)';
+        }
+      };
+
+      document.getElementById('btnPullKnowledgeCloud')?.addEventListener('click', async () => {
+        if (!global.database || !global.ArturitoCloud?.store) return;
+        if (!global.ArturitoCloud.fb.auth?.currentUser) {
+          global.toast?.('Inicia sesión como administrador para recuperar desde la nube', 'warning');
+          return;
+        }
+        setRecoveryStatus('Descargando conocimiento desde Firestore…');
+        try {
+          await global.ArturitoCloud.store.pullKnowledgeFromCloud(global.database);
+          await global.RAGModule?.rebuildIndex?.();
+          global.KnowledgeBaseModule?.syncFromGadget?.();
+          global.App?.refresh?.();
+          const n = global.database.gadgetKB?.length || 0;
+          const m = global.database.manualKnowledge?.length || 0;
+          setRecoveryStatus(`Descargado: ${n} temas Gadget, ${m} manuales desde la nube.`, true);
+          global.toast?.('Conocimiento actualizado desde Firestore', 'success');
+        } catch (err) {
+          setRecoveryStatus('Error: ' + err.message, false);
+          global.toast?.('No se pudo descargar: ' + err.message, 'error');
+        }
+      });
+
+      document.getElementById('btnCreateKnowledgeBackup')?.addEventListener('click', async () => {
+        if (!global.ArturitoCloud?.store || !global.ArturitoCloud.fb.auth?.currentUser) {
+          global.toast?.('Inicia sesión como administrador', 'warning');
+          return;
+        }
+        try {
+          const id = await global.ArturitoCloud.store.createKnowledgeBackup('manual');
+          if (!id) {
+            setRecoveryStatus('No hay datos en la nube para respaldar.', false);
+            return;
+          }
+          setRecoveryStatus('Respaldo creado: ' + id, true);
+          global.toast?.('Respaldo guardado en Firestore', 'success');
+        } catch (err) {
+          setRecoveryStatus('Error: ' + err.message, false);
+        }
+      });
+
+      document.getElementById('btnListKnowledgeBackups')?.addEventListener('click', async () => {
+        if (!global.ArturitoCloud?.store || !global.ArturitoCloud.fb.auth?.currentUser) {
+          global.toast?.('Inicia sesión como administrador', 'warning');
+          return;
+        }
+        try {
+          const list = await global.ArturitoCloud.store.listKnowledgeBackups();
+          if (!list.length) {
+            setRecoveryStatus('No hay respaldos automáticos aún. Se crean antes de cada reemplazo masivo.', false);
+            return;
+          }
+          const lines = list.map((b) =>
+            `${new Date(b.createdAt).toLocaleString('es-CL')} — ${b.gadgetCount || 0} gadget, ${b.manualCount || 0} manual (${b.reason || 'auto'}) [${b.id}]`
+          ).join('\n');
+          setRecoveryStatus(lines, true);
+        } catch (err) {
+          setRecoveryStatus('Error: ' + err.message, false);
+        }
+      });
+
+      document.getElementById('btnRestoreLatestBackup')?.addEventListener('click', async () => {
+        if (!global.database || !global.ArturitoCloud?.store || !global.ArturitoCloud.fb.auth?.currentUser) {
+          global.toast?.('Inicia sesión como administrador', 'warning');
+          return;
+        }
+        try {
+          const list = await global.ArturitoCloud.store.listKnowledgeBackups();
+          if (!list.length) {
+            global.toast?.('No hay respaldos. Usa Point-in-time recovery en Firebase Console.', 'warning');
+            return;
+          }
+          const latest = list[0];
+          const ok = global.confirm?.(
+            `¿Restaurar respaldo del ${new Date(latest.createdAt).toLocaleString('es-CL')}?\n` +
+            `${latest.gadgetCount || 0} temas Gadget, ${latest.manualCount || 0} manuales.\n\nSe creará otro respaldo del estado actual antes de restaurar.`
+          );
+          if (!ok) return;
+          const res = await global.ArturitoCloud.store.restoreKnowledgeBackup(latest.id, global.database);
+          await global.RAGModule?.rebuildIndex?.();
+          global.App?.refresh?.();
+          setRecoveryStatus(`Restaurado ${res.gadget} gadget + ${res.manual} manual desde ${latest.id}`, true);
+          global.toast?.('Conocimiento restaurado desde respaldo', 'success');
+        } catch (err) {
+          setRecoveryStatus('Error: ' + err.message, false);
+          global.toast?.('Restauración falló: ' + err.message, 'error');
         }
       });
     }
@@ -4627,10 +4838,21 @@ const DatabaseModule = {
   importJSON(jsonStr) {
     const data = JSON.parse(jsonStr);
     if (data.users && data.tickets && data.settings) {
+      if (!confirm('¿Importar este JSON y reemplazar el conocimiento en la nube? Se creará un respaldo automático si hay datos actuales.')) {
+        return false;
+      }
       database = data;
       this.ensureDefaults();
       if (typeof KnowledgeBaseModule !== 'undefined') KnowledgeBaseModule.syncFromGadget();
-      this.save('full', { fullSync: true });
+      void (async () => {
+        if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.store?.createKnowledgeBackup) {
+          try { await ArturitoCloud.store.createKnowledgeBackup('before_import'); } catch (_) {}
+        }
+        await this.save('full', { fullSync: true });
+        App?.refresh?.();
+        await RAGModule?.rebuildIndex?.();
+        toast('Datos importados y sincronizados con la nube', 'success');
+      })();
       return true;
     }
     return false;
@@ -10103,7 +10325,9 @@ const App = {
 
     if (cloudOk) {
       DatabaseModule.repairEmptySettings();
-      if (!database.gadgetKB?.length) DatabaseModule.repairKnowledgeIfEmpty();
+      await ArturitoCloud.store?.pullKnowledgeFromCloud?.(database).catch((err) => {
+        console.warn('[App] pullKnowledge:', err);
+      });
       KnowledgeBaseModule.syncFromGadget();
       await RAGModule.rebuildIndex();
       SettingsModule.apply();
