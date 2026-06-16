@@ -1256,7 +1256,13 @@ body.mode-client #adminApp{display:none!important}
               <div class="form-group full"><span id="cloudSetupStatus" style="font-size:.78rem;color:var(--text-muted)"></span></div>
             </form>
             <details style="margin-top:.75rem;font-size:.78rem;color:var(--text-muted)">
-              <summary style="cursor:pointer;font-weight:600;color:var(--text)">Desplegar Cloud Functions (terminal local)</summary>
+              <summary style="cursor:pointer;font-weight:600;color:var(--text)">Cloud Functions embebidas (monolito)</summary>
+              <p style="margin:.5rem 0;line-height:1.5">Todo el código servidor (IMAP/SMTP, nodemailer) está dentro de este <strong>index.html</strong>. El navegador no puede ejecutarlo: expórtalo a <code>functions/</code> y despliega con Firebase CLI.</p>
+              <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem">
+                <button type="button" class="btn btn-secondary btn-sm" id="btnExportFnIndex">Descargar index.js</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnExportFnPackage">Descargar package.json</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnCopyFnIndex">Copiar index.js</button>
+              </div>
               <pre id="deployCommandsBlock" style="margin-top:.5rem;padding:.75rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);overflow-x:auto;white-space:pre-wrap;font-size:.72rem;line-height:1.5"></pre>
             </details>
           </div>
@@ -2379,6 +2385,575 @@ const ARTURITO_GADGET_KB_SEED = [
   }
 ];
 </script>
+<!-- ARTURITO MONOLITO: Cloud Functions (IMAP/SMTP) embebidas en este HTML.
+     El navegador no puede ejecutar nodemailer/imapflow; exporta a functions/ y despliega con Firebase CLI. -->
+<script type="text/plain" id="arturitoFnIndex" data-arturito-fn="index.js">
+/**
+ * ARTURITO AI — Tickets por correo electrónico
+ * Cloud Functions: recepción IMAP + respuesta SMTP + prueba de configuración
+ */
+const admin = require('firebase-admin');
+const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { setGlobalOptions } = require('firebase-functions/v2');
+const { ImapFlow } = require('imapflow');
+const { simpleParser } = require('mailparser');
+const nodemailer = require('nodemailer');
+
+admin.initializeApp();
+const db = admin.firestore();
+const bucket = admin.storage().bucket();
+
+setGlobalOptions({ region: 'us-central1', maxInstances: 10 });
+
+const STAFF_ROLES = ['SuperAdmin', 'Administrador', 'Supervisor', 'Operador', 'Conserje', 'Comité'];
+
+function fail(code, message) {
+  throw new HttpsError(code, message);
+}
+
+function cfgPath(condominioId) {
+  return `condominios/${condominioId}/email_config/main`;
+}
+
+function metaPath(condominioId) {
+  return `condominios/${condominioId}/email_meta/main`;
+}
+
+function ticketsCol(condominioId) {
+  return db.collection(`condominios/${condominioId}/tickets`);
+}
+
+function notificationsCol(condominioId) {
+  return db.collection(`condominios/${condominioId}/notifications`);
+}
+
+async function assertStaff(uid) {
+  if (!uid) fail('unauthenticated', 'Debe iniciar sesión');
+  const snap = await db.doc(`users/${uid}`).get();
+  const role = snap.data()?.rol;
+  if (!STAFF_ROLES.includes(role)) {
+    fail('permission-denied', 'No tienes permisos de administración');
+  }
+  return snap.data();
+}
+
+async function loadEmailConfig(condominioId) {
+  const snap = await db.doc(cfgPath(condominioId)).get();
+  if (!snap.exists) return null;
+  const cfg = snap.data();
+  if (cfg.enabled === false) return null;
+  if (!cfg.smtpHost || !cfg.user || !cfg.password) return null;
+  return cfg;
+}
+
+function imapDefaults(cfg) {
+  return {
+    host: cfg.imapHost || (cfg.smtpHost?.includes('gmail') ? 'imap.gmail.com' : cfg.smtpHost),
+    port: cfg.imapPort || 993,
+    secure: cfg.imapSecure !== false
+  };
+}
+
+function createTransporter(cfg) {
+  return nodemailer.createTransport({
+    host: cfg.smtpHost,
+    port: cfg.smtpPort || 587,
+    secure: cfg.smtpSecure === true,
+    auth: { user: cfg.user, pass: cfg.password }
+  });
+}
+
+async function nextTicketNumber(condominioId) {
+  const ref = db.doc(metaPath(condominioId));
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const current = snap.exists ? (snap.data().lastTicketNumber || 0) : 0;
+    const next = current + 1;
+    tx.set(ref, {
+      lastTicketNumber: next,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    return `TK-${String(next).padStart(6, '0')}`;
+  });
+}
+
+/** Extrae número secuencial de TK-000042 o TK-20250613-0003 (legado) */
+function parseTicketSequence(value) {
+  const s = String(value || '').trim();
+  let m = s.match(/^TK-(\d{6})$/i);
+  if (m) return parseInt(m[1], 10);
+  m = s.match(/^TK-\d{8}-(\d+)$/i);
+  if (m) return parseInt(m[1], 10);
+  return 0;
+}
+
+async function syncTicketCounterFromTickets(condominioId) {
+  const snap = await ticketsCol(condominioId).get();
+  let max = 0;
+  snap.docs.forEach((d) => {
+    const data = d.data();
+    max = Math.max(
+      max,
+      parseTicketSequence(data.numeroTicket),
+      parseTicketSequence(data.id),
+      parseTicketSequence(d.id)
+    );
+  });
+  const metaRef = db.doc(metaPath(condominioId));
+  await db.runTransaction(async (tx) => {
+    const meta = await tx.get(metaRef);
+    const stored = meta.exists ? (meta.data().lastTicketNumber || 0) : 0;
+    const next = Math.max(stored, max);
+    tx.set(metaRef, {
+      lastTicketNumber: next,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+  });
+  return max;
+}
+
+function extractTicketRef(subject) {
+  const m = String(subject || '').match(/\b(TK-\d{6})\b/i);
+  return m ? m[1].toUpperCase() : null;
+}
+
+function stripHtml(html) {
+  return String(html || '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function uploadAttachment(condominioId, ticketId, attachment) {
+  if (!attachment?.content?.length) return null;
+  const safeName = String(attachment.filename || 'adjunto').replace(/[^\w.\-() ]/g, '_').slice(0, 120);
+  const path = `condominios/${condominioId}/tickets/${ticketId}/${Date.now()}_${safeName}`;
+  const file = bucket.file(path);
+  await file.save(attachment.content, {
+    metadata: { contentType: attachment.contentType || 'application/octet-stream' }
+  });
+  const [url] = await file.getSignedUrl({
+    action: 'read',
+    expires: '03-01-2500'
+  });
+  return {
+    nombre: safeName,
+    url,
+    tipo: attachment.contentType || 'application/octet-stream',
+    tamaño: attachment.size || attachment.content.length,
+    fecha: Date.now()
+  };
+}
+
+async function pushNotification(condominioId, { titulo, mensaje, ticketId, tipo }) {
+  await notificationsCol(condominioId).add({
+    usuarioDestino: 'staff',
+    titulo,
+    mensaje,
+    leida: false,
+    tipo: tipo || 'email_ticket',
+    ticketId: ticketId || null,
+    fecha: Date.now()
+  });
+}
+
+async function findTicketByNumber(condominioId, numeroTicket) {
+  const q = await ticketsCol(condominioId)
+    .where('numeroTicket', '==', numeroTicket)
+    .limit(1)
+    .get();
+  if (q.empty) return null;
+  const doc = q.docs[0];
+  return { id: doc.id, ref: doc.ref, data: doc.data() };
+}
+
+async function findTicketByMessageId(condominioId, messageId) {
+  if (!messageId) return null;
+  const q = await ticketsCol(condominioId)
+    .where('emailMessageId', '==', messageId)
+    .limit(1)
+    .get();
+  if (q.empty) return null;
+  const doc = q.docs[0];
+  return { id: doc.id, ref: doc.ref, data: doc.data() };
+}
+
+async function processInboundEmail(condominioId, cfg, parsed, rawMeta = {}) {
+  const from = parsed.from?.value?.[0] || {};
+  const email = (from.address || '').toLowerCase();
+  const remitente = from.name || email.split('@')[0] || 'Residente';
+  const asunto = parsed.subject || '(Sin asunto)';
+  const cuerpo = (parsed.text || stripHtml(parsed.html) || '').trim();
+  const messageId = parsed.messageId || rawMeta.messageId || null;
+  const inReplyTo = parsed.inReplyTo || rawMeta.inReplyTo || null;
+  const references = parsed.references || [];
+
+  const adjuntosMeta = [];
+  const ticketRefFromSubject = extractTicketRef(asunto);
+
+  let existing = null;
+  if (ticketRefFromSubject) {
+    existing = await findTicketByNumber(condominioId, ticketRefFromSubject);
+  }
+  if (!existing && inReplyTo) {
+    existing = await findTicketByMessageId(condominioId, inReplyTo);
+  }
+  if (!existing && inReplyTo) {
+    const q2 = await ticketsCol(condominioId).where('lastSentMessageId', '==', inReplyTo).limit(1).get();
+    if (!q2.empty) {
+      const doc = q2.docs[0];
+      existing = { id: doc.id, ref: doc.ref, data: doc.data() };
+    }
+  }
+  if (!existing && references.length) {
+    for (const refId of references) {
+      existing = await findTicketByMessageId(condominioId, refId);
+      if (existing) break;
+    }
+  }
+
+  const historialEntry = {
+    autor: 'cliente',
+    nombre: remitente,
+    email,
+    mensaje: cuerpo,
+    fecha: Date.now(),
+    adjuntos: []
+  };
+
+  if (existing) {
+    const ticketId = existing.id;
+    for (const att of parsed.attachments || []) {
+      const meta = await uploadAttachment(condominioId, ticketId, att);
+      if (meta) {
+        adjuntosMeta.push(meta);
+        historialEntry.adjuntos.push(meta);
+      }
+    }
+    const historial = Array.isArray(existing.data.historial) ? existing.data.historial.slice() : [];
+    historial.push(historialEntry);
+    const adjuntos = (existing.data.adjuntos || []).concat(adjuntosMeta);
+    await existing.ref.update({
+      historial,
+      adjuntos,
+      fechaActualizacion: Date.now(),
+      updatedAt: Date.now(),
+      estado: existing.data.estado === 'Cerrado' || existing.data.estado === 'Resuelto'
+        ? 'Abierto'
+        : existing.data.estado
+    });
+    await pushNotification(condominioId, {
+      titulo: 'Nueva respuesta por correo',
+      mensaje: `${existing.data.numeroTicket} — ${remitente}: ${asunto}`,
+      ticketId: existing.data.numeroTicket,
+      tipo: 'email_reply'
+    });
+    return { action: 'reply', ticketId: existing.data.numeroTicket };
+  }
+
+  const numeroTicket = await nextTicketNumber(condominioId);
+  const docRef = ticketsCol(condominioId).doc(numeroTicket);
+  historialEntry.adjuntos = [];
+
+  for (const att of parsed.attachments || []) {
+    const meta = await uploadAttachment(condominioId, numeroTicket, att);
+    if (meta) {
+      adjuntosMeta.push(meta);
+      historialEntry.adjuntos.push(meta);
+    }
+  }
+
+  const now = Date.now();
+  const ticketData = {
+    id: numeroTicket,
+    numeroTicket,
+    origen: 'email',
+    remitente,
+    nombre: remitente,
+    email,
+    asunto,
+    mensaje: cuerpo,
+    descripcion: cuerpo,
+    categoria: 'Consultas por correo',
+    prioridad: 'Media',
+    estado: 'Abierto',
+    departamento: '',
+    historial: [historialEntry],
+    adjuntos: adjuntosMeta,
+    attachments: adjuntosMeta,
+    emailMessageId: messageId,
+    emailThreadId: messageId,
+    fechaCreacion: now,
+    fechaActualizacion: now,
+    createdAt: now,
+    updatedAt: now,
+    fecha: now
+  };
+
+  await docRef.set(ticketData);
+  await pushNotification(condominioId, {
+    titulo: 'Nuevo ticket por correo',
+    mensaje: `${numeroTicket} — ${remitente}: ${asunto}`,
+    ticketId: numeroTicket,
+    tipo: 'email_ticket'
+  });
+  return { action: 'created', ticketId: numeroTicket };
+}
+
+async function pollCondominio(condominioId, cfg) {
+  const imapCfg = imapDefaults(cfg);
+  const client = new ImapFlow({
+    host: imapCfg.host,
+    port: imapCfg.port,
+    secure: imapCfg.secure,
+    auth: { user: cfg.user, pass: cfg.password },
+    logger: false
+  });
+
+  const processed = [];
+  const metaRef = db.doc(metaPath(condominioId));
+  const metaSnap = await metaRef.get();
+  let lastUid = metaSnap.exists ? (metaSnap.data().lastPollUid || 0) : 0;
+
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock('INBOX');
+    try {
+      const searchCriteria = lastUid > 0 ? { uid: `${lastUid + 1}:*` } : { seen: false };
+      const messages = [];
+      for await (const msg of client.fetch(searchCriteria, {
+        uid: true,
+        source: true,
+        envelope: true
+      })) {
+        if (msg.uid <= lastUid) continue;
+        messages.push(msg);
+      }
+
+      messages.sort((a, b) => a.uid - b.uid);
+
+      for (const msg of messages) {
+        try {
+          const parsed = await simpleParser(msg.source);
+          parsed.messageId = parsed.messageId || msg.envelope?.messageId;
+          const result = await processInboundEmail(condominioId, cfg, parsed, {
+            messageId: msg.envelope?.messageId,
+            inReplyTo: parsed.inReplyTo
+          });
+          processed.push(result);
+          lastUid = Math.max(lastUid, msg.uid);
+        } catch (err) {
+          console.error(`[pollEmails] parse ${condominioId} uid=${msg.uid}:`, err.message);
+        }
+      }
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await client.logout().catch(() => {});
+  }
+
+  await metaRef.set({
+    lastPollUid: lastUid,
+    lastPollAt: Date.now(),
+    lastProcessed: processed.length
+  }, { merge: true });
+
+  return processed;
+}
+
+exports.pollInboundEmails = onSchedule({
+  schedule: 'every 5 minutes',
+  timeZone: 'America/Santiago',
+  retryCount: 1
+}, async () => {
+  const condosSnap = await db.collectionGroup('email_config').get();
+  const results = [];
+
+  for (const doc of condosSnap.docs) {
+    const cfg = doc.data();
+    if (cfg.enabled === false) continue;
+    if (!cfg.smtpHost || !cfg.user || !cfg.password) continue;
+    const parts = doc.ref.path.split('/');
+    const condominioId = parts[1];
+    try {
+      const processed = await pollCondominio(condominioId, cfg);
+      results.push({ condominioId, processed: processed.length });
+    } catch (err) {
+      console.error(`[pollInboundEmails] ${condominioId}:`, err.message);
+      results.push({ condominioId, error: err.message });
+    }
+  }
+
+  console.log('[pollInboundEmails] done', JSON.stringify(results));
+  return results;
+});
+
+/** Callable Gen2 — CORS explícito para GitHub Pages (kike01f.github.io) */
+const callableOpts = {
+  region: 'us-central1',
+  cors: true,
+  invoker: 'public'
+};
+
+const callableLongOpts = {
+  ...callableOpts,
+  timeoutSeconds: 300,
+  memory: '512MiB'
+};
+
+async function sendEmailTicketReplyHandler(data, auth) {
+  await assertStaff(auth?.uid);
+  const { condominioId, ticketId, mensaje, adminNombre } = data || {};
+
+  if (!condominioId || !ticketId || !mensaje?.trim()) {
+    fail('invalid-argument', 'Faltan datos: condominioId, ticketId, mensaje');
+  }
+
+  const cfg = await loadEmailConfig(condominioId);
+  if (!cfg) fail('failed-precondition', 'Configuración de correo incompleta o desactivada');
+
+  const ticketSnap = await ticketsCol(condominioId).doc(ticketId).get();
+  if (!ticketSnap.exists) fail('not-found', 'Ticket no encontrado');
+
+  const ticket = ticketSnap.data();
+  if (ticket.origen !== 'email') {
+    fail('failed-precondition', 'Este ticket no proviene de correo electrónico');
+  }
+
+  const transporter = createTransporter(cfg);
+  const fromEmail = cfg.supportEmail || cfg.user;
+  const numero = ticket.numeroTicket || ticketId;
+  const subject = `[${numero}] Re: ${ticket.asunto || 'Consulta'}`;
+  const staffName = adminNombre || 'Administración';
+
+  const mailOptions = {
+    from: `"${cfg.fromName || 'Soporte Condominio'}" <${fromEmail}>`,
+    to: ticket.email,
+    subject,
+    text: mensaje.trim(),
+    html: `<p>${mensaje.trim().replace(/\n/g, '<br>')}</p><hr><p style="color:#666;font-size:12px">Ticket ${numero} — ${cfg.buildingName || 'Condominio'}</p>`,
+    inReplyTo: ticket.emailMessageId || undefined,
+    references: ticket.emailThreadId || ticket.emailMessageId || undefined
+  };
+
+  const info = await transporter.sendMail(mailOptions);
+  const now = Date.now();
+  const entry = {
+    autor: 'administrador',
+    nombre: staffName,
+    email: fromEmail,
+    mensaje: mensaje.trim(),
+    fecha: now,
+    adjuntos: []
+  };
+
+  const historial = Array.isArray(ticket.historial) ? ticket.historial.slice() : [];
+  historial.push(entry);
+
+  const newEstado = ticket.estado === 'Abierto' || ticket.estado === 'En Revisión' ? 'En Proceso' : ticket.estado;
+
+  await ticketSnap.ref.update({
+    historial,
+    estado: newEstado,
+    fechaActualizacion: now,
+    updatedAt: now,
+    ultimaRespuestaAdmin: now,
+    lastSentMessageId: info.messageId
+  });
+
+  return { ok: true, messageId: info.messageId, estado: newEstado };
+}
+
+async function testEmailConfigHandler(data, auth) {
+  await assertStaff(auth?.uid);
+  const { condominioId } = data || {};
+  if (!condominioId) fail('invalid-argument', 'condominioId requerido');
+
+  const cfg = await loadEmailConfig(condominioId);
+  if (!cfg) fail('failed-precondition', 'Guarda la configuración de correo antes de probar');
+
+  const transporter = createTransporter(cfg);
+  await transporter.verify();
+
+  const imapCfg = imapDefaults(cfg);
+  const client = new ImapFlow({
+    host: imapCfg.host,
+    port: imapCfg.port,
+    secure: imapCfg.secure,
+    auth: { user: cfg.user, pass: cfg.password },
+    logger: false
+  });
+  await client.connect();
+  await client.logout();
+
+  return { ok: true, message: 'Conexión SMTP e IMAP correcta' };
+}
+
+async function pollEmailsNowHandler(data, auth) {
+  await assertStaff(auth?.uid);
+  const { condominioId } = data || {};
+  if (!condominioId) fail('invalid-argument', 'condominioId requerido');
+
+  const cfg = await loadEmailConfig(condominioId);
+  if (!cfg) fail('failed-precondition', 'Configuración de correo incompleta');
+
+  const processed = await pollCondominio(condominioId, cfg);
+  return { ok: true, processed: processed.length, details: processed };
+}
+
+exports.sendEmailTicketReply = onCall(callableOpts, (request) =>
+  sendEmailTicketReplyHandler(request.data, request.auth)
+);
+
+exports.testEmailConfig = onCall(callableOpts, (request) =>
+  testEmailConfigHandler(request.data, request.auth)
+);
+
+exports.pollEmailsNow = onCall(callableLongOpts, (request) =>
+  pollEmailsNowHandler(request.data, request.auth)
+);
+
+/** Correlativo global TK-000001 — portal, chat y correo (transacción atómica) */
+exports.allocateTicketNumber = onCall(callableOpts, async (request) => {
+  const { condominioId } = request.data || {};
+  if (!condominioId) fail('invalid-argument', 'condominioId requerido');
+  const metaSnap = await db.doc(metaPath(condominioId)).get();
+  const stored = metaSnap.exists ? (metaSnap.data().lastTicketNumber || 0) : 0;
+  if (stored === 0) {
+    await syncTicketCounterFromTickets(condominioId);
+  }
+  const numeroTicket = await nextTicketNumber(condominioId);
+  return { numeroTicket };
+});
+
+</script>
+<script type="text/plain" id="arturitoFnPackage" data-arturito-fn="package.json">
+{
+  "name": "arturito-email-tickets",
+  "description": "Cloud Functions — recepción y respuesta de tickets por correo",
+  "engines": {
+    "node": "20"
+  },
+  "main": "index.js",
+  "scripts": {
+    "serve": "firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.7.0",
+    "firebase-functions": "^5.1.1",
+    "imapflow": "^1.0.164",
+    "mailparser": "^3.7.2",
+    "nodemailer": "^6.9.16"
+  },
+  "private": true
+}
+
+</script>
 <script>
 /* ─── Firebase Cloud (embebido) ─── */
 /**
@@ -2848,14 +3423,27 @@ const ARTURITO_GADGET_KB_SEED = [
       data.fechaCreacion = Date.now();
       data.fechaActualizacion = Date.now();
 
+      const cloudAdj = [];
       if (files.length) {
-        data.adjuntos = [];
         for (const file of files) {
-          const path = this.storage.pathTicket(this.fb.getCondominioId(), id, `${Date.now()}_${file.name}`);
+          const path = this.storage.pathTicket(this.fb.getCondominioId(), id, `${Date.now()}_${String(file.name).replace(/[^\w.\-()+]/g, '_')}`);
           const meta = await this.storage.upload(file, path);
-          data.adjuntos.push(meta);
+          cloudAdj.push(meta);
         }
+      } else if (Array.isArray(ticket.attachments) && ticket.attachments.length) {
+        ticket.attachments.forEach((a) => {
+          cloudAdj.push({
+            nombre: a.name || a.nombre,
+            url: a.url,
+            tipo: a.mimeType || a.tipo,
+            tamaño: a.size || a.tamaño,
+            fecha: a.createdAt || a.fecha || Date.now()
+          });
+        });
+      } else if (Array.isArray(ticket.adjuntos) && ticket.adjuntos.length) {
+        cloudAdj.push(...ticket.adjuntos);
       }
+      if (cloudAdj.length) data.adjuntos = cloudAdj;
 
       await setDoc(doc(this.fb.col('tickets'), id), data);
       if (this.notifications) {
@@ -2872,8 +3460,40 @@ const ARTURITO_GADGET_KB_SEED = [
     async update(id, patch) {
       const { updateDoc, doc } = this.fb._modules;
       const data = { ...patch, fechaActualizacion: Date.now() };
+      if (patch.adjuntos) data.adjuntos = patch.adjuntos;
+      if (patch.attachments && !patch.adjuntos) {
+        data.adjuntos = patch.attachments.map((a) => ({
+          nombre: a.name || a.nombre,
+          url: a.url,
+          tipo: a.mimeType || a.tipo,
+          tamaño: a.size || a.tamaño,
+          fecha: a.createdAt || a.fecha || Date.now()
+        }));
+        delete data.attachments;
+      }
       await updateDoc(doc(this.fb.col('tickets'), id), data);
       return data;
+    }
+
+    /** Sube archivos a Storage y devuelve metadatos para Firestore */
+    async uploadAttachments(ticketId, files = []) {
+      if (!files.length) return [];
+      const adjuntos = [];
+      for (const file of files) {
+        const safeName = String(file.name || 'archivo').replace(/[^\w.\-()+]/g, '_');
+        const path = this.storage.pathTicket(this.fb.getCondominioId(), ticketId, `${Date.now()}_${safeName}`);
+        const meta = await this.storage.upload(file, path);
+        adjuntos.push(meta);
+      }
+      return adjuntos;
+    }
+
+    async updateAttachments(ticketId, adjuntos) {
+      const { updateDoc, doc } = this.fb._modules;
+      await updateDoc(doc(this.fb.col('tickets'), ticketId), {
+        adjuntos: adjuntos || [],
+        fechaActualizacion: Date.now()
+      });
     }
 
     async delete(id) {
@@ -3031,7 +3651,61 @@ const ARTURITO_GADGET_KB_SEED = [
     }
   }
 
-  /* ─── CloudEmailManager — Tickets por correo (SMTP/IMAP + Cloud Functions) ─── */
+  /* ─── CloudFunctionsEmbed — Código servidor embebido en este HTML (monolito) ─── */
+  class CloudFunctionsEmbed {
+    static FILE_IDS = {
+      'index.js': 'arturitoFnIndex',
+      'package.json': 'arturitoFnPackage'
+    };
+
+    static CALLABLES = {
+      pollEmailsNow: { type: 'onCall', auth: 'staff', desc: 'Revisar IMAP y crear/actualizar tickets' },
+      sendEmailTicketReply: { type: 'onCall', auth: 'staff', desc: 'Enviar respuesta SMTP al residente' },
+      testEmailConfig: { type: 'onCall', auth: 'staff', desc: 'Probar conexión SMTP e IMAP' },
+      allocateTicketNumber: { type: 'onCall', auth: 'public', desc: 'Correlativo global TK-000001' }
+    };
+
+    static SCHEDULED = {
+      pollInboundEmails: { schedule: 'every 5 minutes', desc: 'Polling IMAP automático (sin panel)' }
+    };
+
+    static getSource(filename) {
+      const id = CloudFunctionsEmbed.FILE_IDS[filename];
+      const el = typeof document !== 'undefined' ? document.getElementById(id) : null;
+      if (!el) return '';
+      return el.textContent.replace(/^\n/, '');
+    }
+
+    static listFiles() {
+      return Object.keys(CloudFunctionsEmbed.FILE_IDS);
+    }
+
+    static download(filename) {
+      const src = CloudFunctionsEmbed.getSource(filename);
+      if (!src) throw new Error('Código embebido no encontrado: ' + filename);
+      const blob = new Blob([src], { type: 'text/plain;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    }
+
+    static async copyToClipboard(filename) {
+      const src = CloudFunctionsEmbed.getSource(filename);
+      if (!src) throw new Error('Código embebido no encontrado: ' + filename);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(src);
+      } else {
+        throw new Error('Portapapeles no disponible');
+      }
+      return src.length;
+    }
+  }
+
+  /* ─── CloudEmailManager — Cliente tickets por correo (llama callables embebidas arriba) ─── */
   class CloudEmailManager {
     constructor(fb, auth) {
       this.fb = fb;
@@ -3072,9 +3746,13 @@ const ARTURITO_GADGET_KB_SEED = [
 
     _callableError(err) {
       if (err?.code === 'functions/internal' && /cors|fetch/i.test(String(err.message))) {
-        throw new Error('CORS: vuelve a desplegar functions con invoker public (bash deploy-firebase.sh)');
+        throw new Error('CORS: exporta index.js (Configuración → Cloud Functions embebidas) y ejecuta firebase deploy --only functions');
       }
       throw err;
+    }
+
+    listCallables() {
+      return { ...CloudFunctionsEmbed.CALLABLES, scheduled: CloudFunctionsEmbed.SCHEDULED };
     }
 
     async sendReply(ticketId, mensaje, adminNombre) {
@@ -4429,6 +5107,8 @@ const ARTURITO_GADGET_KB_SEED = [
     sync,
     store,
     chatbot,
+    CloudFunctionsEmbed,
+    functionsEmbed: CloudFunctionsEmbed,
     DashboardManager,
     UIManager,
     async init(options = {}) {
@@ -8201,6 +8881,10 @@ const TicketAttachmentModule = {
   },
 
   download(att) {
+    if (att?.url) {
+      window.open(att.url, '_blank', 'noopener,noreferrer');
+      return;
+    }
     if (!att?.data) return;
     const blob = new Blob([att.data], { type: att.mimeType || 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
@@ -8217,6 +8901,53 @@ const TicketModule = {
   sortField: 'createdAt', sortDir: -1,
   _pendingFiles: [],
   _savedAttachments: [],
+
+  normalizeAttachment(a) {
+    if (!a) return null;
+    return {
+      id: a.id || a.url || `${a.name || a.nombre || 'att'}_${a.size || a.tamaño || 0}`,
+      name: a.name || a.nombre || 'adjunto',
+      url: a.url || null,
+      mimeType: a.mimeType || a.tipo || 'application/octet-stream',
+      size: a.size || a.tamaño || 0,
+      createdAt: a.createdAt || a.fecha || Date.now()
+    };
+  },
+
+  toCloudAdjuntos(list) {
+    return (list || []).map((a) => ({
+      nombre: a.name || a.nombre,
+      url: a.url,
+      tipo: a.mimeType || a.tipo,
+      tamaño: a.size || a.tamaño,
+      fecha: a.createdAt || a.fecha || Date.now()
+    }));
+  },
+
+  /** Sube adjuntos pendientes a Storage (nube) o IndexedDB (fallback local) */
+  async uploadPendingAttachments(ticketId) {
+    const files = this._pendingFiles.slice();
+    if (!files.length) return [];
+    if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.tickets?.uploadAttachments && ArturitoCloud.fb?.isEnabled()) {
+      try {
+        const raw = await ArturitoCloud.tickets.uploadAttachments(ticketId, files);
+        this._pendingFiles = [];
+        return raw.map((m) => this.normalizeAttachment({
+          id: m.url,
+          name: m.nombre,
+          url: m.url,
+          mimeType: m.tipo,
+          size: m.tamaño,
+          createdAt: m.fecha
+        }));
+      } catch (err) {
+        console.warn('[Ticket] cloud upload:', err);
+        toast(err.message || 'No se pudieron subir adjuntos a la nube', 'error');
+      }
+    }
+    return this.persistPendingFiles(ticketId);
+  },
+
   /** Inicializa módulo de tickets */
   init() {
     this.populateSelects();
@@ -8230,6 +8961,11 @@ const TicketModule = {
     document.getElementById('ticketAttachList').addEventListener('click', async e => {
       const dl = e.target.closest('[data-dl-att]');
       if (dl) {
+        const saved = this._savedAttachments.find((a) => a.id === dl.dataset.dlAtt);
+        if (saved?.url) {
+          TicketAttachmentModule.download(saved);
+          return;
+        }
         const att = await TicketAttachmentModule.getOne(dl.dataset.dlAtt);
         if (att) TicketAttachmentModule.download(att);
         return;
@@ -8283,7 +9019,7 @@ const TicketModule = {
       if (st && t.estado !== st) return false;
       if (pr && t.prioridad !== pr) return false;
       if (q && !Object.values(t).some(v => String(v).toLowerCase().includes(q)) &&
-        !(t.attachments || []).some(a => String(a.name || '').toLowerCase().includes(q))) return false;
+        !(t.attachments || t.adjuntos || []).some(a => String(a.name || a.nombre || '').toLowerCase().includes(q))) return false;
       return true;
     }).sort((a,b) => {
       const av = a[this.sortField], bv = b[this.sortField];
@@ -8309,7 +9045,13 @@ const TicketModule = {
   },
   async loadAttachments(ticketId) {
     this._pendingFiles = [];
-    this._savedAttachments = ticketId ? await TicketAttachmentModule.listMeta(ticketId) : [];
+    const t = database.tickets.find((x) => x.id === ticketId || x.numeroTicket === ticketId);
+    const fromCloud = (t?.attachments || t?.adjuntos || []).map((a) => this.normalizeAttachment(a)).filter(Boolean);
+    const fromIdb = (await TicketAttachmentModule.listMeta(ticketId)).map((a) => this.normalizeAttachment(a));
+    const merged = new Map();
+    fromCloud.forEach((a) => merged.set(a.url || a.id, a));
+    fromIdb.forEach((a) => { if (!merged.has(a.id)) merged.set(a.id, a); });
+    this._savedAttachments = [...merged.values()];
     this.renderAttachmentList();
   },
   renderAttachmentList() {
@@ -8354,13 +9096,22 @@ const TicketModule = {
     if (added) this.renderAttachmentList();
   },
   async removeSavedAttachment(id) {
-    await TicketAttachmentModule.delete(id);
-    this._savedAttachments = this._savedAttachments.filter(a => a.id !== id);
+    const removed = this._savedAttachments.find((a) => a.id === id);
+    this._savedAttachments = this._savedAttachments.filter((a) => a.id !== id);
+    if (!removed?.url) await TicketAttachmentModule.delete(id).catch(() => {});
     const editId = document.getElementById('ticketEditId').value;
     if (editId) {
-      const idx = database.tickets.findIndex(t => t.id === editId);
+      const idx = database.tickets.findIndex((t) => t.id === editId);
       if (idx >= 0) {
-        database.tickets[idx].attachments = await TicketAttachmentModule.listMeta(editId);
+        const attachments = this._savedAttachments.slice();
+        database.tickets[idx] = { ...database.tickets[idx], attachments, adjuntos: attachments };
+        if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.tickets?.updateAttachments && ArturitoCloud.fb?.isEnabled()) {
+          try {
+            await ArturitoCloud.tickets.updateAttachments(editId, this.toCloudAdjuntos(attachments));
+          } catch (err) {
+            console.warn('[Ticket] update attachments:', err);
+          }
+        }
         DatabaseModule.save();
       }
     }
@@ -8448,9 +9199,12 @@ const TicketModule = {
         const idx = database.tickets.findIndex(t => t.id === editId);
         if (idx >= 0) {
           const prev = database.tickets[idx];
-          await this.persistPendingFiles(editId);
-          const attachments = await TicketAttachmentModule.listMeta(editId);
-          const patch = { ...data, attachments };
+          const newUploaded = await this.uploadPendingAttachments(editId);
+          const attachments = [
+            ...(prev.attachments || prev.adjuntos || []).map((a) => this.normalizeAttachment(a)),
+            ...newUploaded
+          ];
+          const patch = { ...data, attachments, adjuntos: attachments };
           if (prev.estado !== data.estado) {
             appendTicketAudit(patch, 'cambio_estado', AuthModule.currentUser, `Estado: ${prev.estado} → ${data.estado}`);
           } else {
@@ -8458,7 +9212,13 @@ const TicketModule = {
           }
           database.tickets[idx] = { ...prev, ...patch };
           if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled()) {
-            try { await ArturitoCloud.tickets.update(editId, { ...data, historial: database.tickets[idx].historial }); } catch (err) { console.warn('[Cloud] ticket update:', err); }
+            try {
+              await ArturitoCloud.tickets.update(editId, {
+                ...data,
+                historial: database.tickets[idx].historial,
+                adjuntos: this.toCloudAdjuntos(attachments)
+              });
+            } catch (err) { console.warn('[Cloud] ticket update:', err); }
           }
         }
         toast('Ticket actualizado', 'success');
@@ -8484,14 +9244,16 @@ const TicketModule = {
           createdAt: Date.now()
         };
         appendTicketAudit(ticket, 'creacion', { nombre: data.nombre, email: data.email }, `Ticket creado — ${data.categoria} (${data.prioridad})`);
+        const uploaded = await this.uploadPendingAttachments(newId);
+        ticket.attachments = uploaded;
+        ticket.adjuntos = uploaded;
         database.tickets.unshift(ticket);
-        const newMetas = await this.persistPendingFiles(newId);
-        ticket.attachments = newMetas.length ? await TicketAttachmentModule.listMeta(newId) : [];
         if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled()) {
           try {
-            await ArturitoCloud.tickets.create(ticket, this._pendingFiles.slice());
+            await ArturitoCloud.tickets.create(ticket);
           } catch (err) {
             console.warn('[Cloud] ticket create:', err);
+            toast('Ticket guardado localmente; adjuntos pueden requerir reconexión.', 'warning');
           }
         }
         toast('Ticket creado: ' + newId, 'success');
@@ -8830,7 +9592,9 @@ const EmailTicketModule = {
 
 /* ─── CloudSetupModule — Admin Auth + instrucciones de deploy ─── */
 const CloudSetupModule = {
-  DEPLOY_CMD: `cd "/Users/kikefrias/Desktop/gestion-comunidad/Entre Cerros"
+  DEPLOY_CMD: `# 1) Exporta index.js y package.json desde Configuración → Cloud Functions embebidas
+# 2) Colócalos en la carpeta functions/ del proyecto
+cd "/Users/kikefrias/Desktop/gestion-comunidad/Entre Cerros"
 cd functions && npm install && cd ..
 firebase login
 firebase use chatbots-hipodromo
@@ -8841,6 +9605,27 @@ firebase deploy --only firestore:rules,firestore:indexes,functions,hosting`,
     if (block) block.textContent = this.DEPLOY_CMD;
     document.getElementById('cloudAdminForm')?.addEventListener('submit', (e) => this.createCloudAdmin(e));
     document.getElementById('btnDeployFirestoreRules')?.addEventListener('click', () => this.copyDeployCommands());
+    document.getElementById('btnExportFnIndex')?.addEventListener('click', () => this.exportFn('index.js'));
+    document.getElementById('btnExportFnPackage')?.addEventListener('click', () => this.exportFn('package.json'));
+    document.getElementById('btnCopyFnIndex')?.addEventListener('click', () => this.copyFn('index.js'));
+  },
+
+  exportFn(filename) {
+    try {
+      ArturitoCloud?.functionsEmbed?.download(filename);
+      toast('Descargado: ' + filename, 'success');
+    } catch (err) {
+      toast(err.message || 'No se pudo exportar', 'error');
+    }
+  },
+
+  async copyFn(filename) {
+    try {
+      const len = await ArturitoCloud.functionsEmbed.copyToClipboard(filename);
+      toast(`Copiado ${filename} (${len} caracteres)`, 'success');
+    } catch (err) {
+      toast(err.message || 'No se pudo copiar', 'error');
+    }
   },
 
   copyDeployCommands() {
