@@ -2884,18 +2884,23 @@ const ARTURITO_GADGET_KB_SEED = [
       return httpsCallable(this.fb.functions, name);
     }
 
-    /** Obtiene siguiente TK-000001 desde Firestore (correlativo único en nube) */
-    async allocateNumber() {
-      if (!this.fb.isEnabled()) {
+    _localTicketFallback() {
+      if (typeof DatabaseModule !== 'undefined' && DatabaseModule.generateTicketIdFallback) {
         return DatabaseModule.generateTicketIdFallback();
       }
+      return `TK-${String(Date.now()).slice(-6)}`;
+    }
+
+    /** Obtiene siguiente TK-000001 desde Firestore (correlativo único en nube) */
+    async allocateNumber() {
+      if (!this.fb.isEnabled()) return this._localTicketFallback();
       try {
         const fn = this._callable('allocateTicketNumber');
         const res = await fn({ condominioId: this.fb.getCondominioId() });
-        return res.data?.numeroTicket || res.data?.numero;
+        return res.data?.numeroTicket || res.data?.numero || this._localTicketFallback();
       } catch (err) {
-        console.warn('[CloudTicket] allocateNumber:', err);
-        throw new Error('No se pudo generar número de ticket. Despliega functions: firebase deploy --only functions');
+        console.warn('[CloudTicket] allocateNumber (fallback local):', err);
+        return this._localTicketFallback();
       }
     }
   }
@@ -3472,8 +3477,11 @@ const ARTURITO_GADGET_KB_SEED = [
     applyRemoteSettings(local, remote) {
       if (!remote || typeof remote !== 'object') return local || {};
       const merged = { ...(local || {}) };
+      const keepLocalIfRemoteEmpty = ['buildingName', 'botName', 'welcomeMessage', 'portalTagline', 'portalHint', 'topicsMenuIntro'];
       CLOUD_SETTINGS_KEYS.forEach((key) => {
-        if (remote[key] !== undefined) merged[key] = remote[key];
+        if (remote[key] === undefined) return;
+        if (keepLocalIfRemoteEmpty.includes(key) && remote[key] === '' && merged[key]) return;
+        merged[key] = remote[key];
       });
       if (local?.adminKey) merged.adminKey = local.adminKey;
       if (remote.updatedAt) merged.updatedAt = remote.updatedAt;
@@ -4021,6 +4029,24 @@ const ARTURITO_GADGET_KB_SEED = [
       let migrated = false;
       await this.sync.pullPublicCloudData(database, true);
 
+      if (!(database.gadgetKB?.length) && global.DatabaseModule?.seedGadgetTemplate?.()) {
+        try {
+          await this.sync.pushGadgetKB(database.gadgetKB, { fullSync: true });
+          this.sync._cloudKBActive = true;
+        } catch (err) {
+          console.warn('[DataStore] seed gadget_kb:', err);
+        }
+        this.sync.applyUnifiedKnowledge(database);
+      }
+      if (global.DatabaseModule?.repairEmptySettings) {
+        global.DatabaseModule.repairEmptySettings();
+        try {
+          await this.sync.syncSettings(database.settings);
+        } catch (err) {
+          console.warn('[DataStore] repair settings:', err);
+        }
+      }
+
       const cloudEmpty = !this.sync._cloudSettingsActive && !this.sync._cloudKBActive;
 
       if (cloudEmpty) {
@@ -4420,6 +4446,32 @@ const DatabaseModule = {
     if (typeof ARTURITO_GADGET_KB_SEED === 'undefined') return false;
     if (database.gadgetKB?.length) return false;
     return this.seedGadgetTemplate();
+  },
+  /** Restaura branding y mensajes del chat si Firestore trae campos vacíos */
+  repairEmptySettings() {
+    if (!database.settings) database.settings = {};
+    const fill = {
+      buildingName: 'Edificio Hipódromo',
+      botName: 'Arturito',
+      welcomeMessage: '¡Hola! Soy Arturito, tu asistente del edificio. Pregúntame sobre horarios, gastos comunes, reservas o crea solicitudes. ¿En qué te ayudo?',
+      portalTagline: 'Tu asistente Arturito disponible 24/7',
+      portalHint: 'Consulta horarios, gastos comunes, reservas o crea solicitudes.\n\nHaz clic en **Arturito** en la esquina inferior derecha.',
+      topicsMenuIntro: DEFAULT_TOPICS_MENU_INTRO
+    };
+    Object.entries(fill).forEach(([k, v]) => {
+      const cur = database.settings[k];
+      if (cur === undefined || (typeof cur === 'string' && !cur.trim())) database.settings[k] = v;
+    });
+    if (!Array.isArray(database.settings.quickQuestions) || !database.settings.quickQuestions.length) {
+      database.settings.quickQuestions = DEFAULT_QUICK_QUESTIONS.slice();
+    }
+    if (!Array.isArray(database.settings.chatShortcuts) || !database.settings.chatShortcuts.length) {
+      database.settings.chatShortcuts = DEFAULT_CHAT_SHORTCUTS.map((s) => ({ ...s }));
+    }
+    if (!database.settings.chatMessages || !Object.keys(database.settings.chatMessages).length) {
+      database.settings.chatMessages = { ...DEFAULT_CHAT_MESSAGES };
+    }
+    return true;
   },
   /** Crea estructura inicial limpia (sin datos piloto) */
   seed() {
@@ -10050,8 +10102,11 @@ const App = {
     }
 
     if (cloudOk) {
+      DatabaseModule.repairEmptySettings();
+      if (!database.gadgetKB?.length) DatabaseModule.repairKnowledgeIfEmpty();
       KnowledgeBaseModule.syncFromGadget();
       await RAGModule.rebuildIndex();
+      SettingsModule.apply();
       this.showCloudSyncLoading(false);
     } else {
       this.showCloudSyncLoading(false);
