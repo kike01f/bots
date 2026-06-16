@@ -1092,7 +1092,7 @@ body.mode-client #adminApp{display:none!important}
               <button class="btn btn-secondary btn-sm" id="btnReindexDocs"><span data-icon="refresh" data-icon-size="sm"></span> Reindexar conocimiento</button>
               <button class="btn btn-danger btn-sm" id="btnClearDocs"><span data-icon="trash" data-icon-size="sm"></span> Eliminar todos los documentos</button>
             </div>
-            <p style="font-size:.8rem;color:var(--text-muted);margin-top:1rem">Los documentos se analizan automáticamente, se dividen por temas y se indexan en IndexedDB. Arturito interpreta el contenido y responde de forma inteligente según la consulta del residente.</p>
+            <p style="font-size:.8rem;color:var(--text-muted);margin-top:1rem">Los documentos se analizan automáticamente, se dividen por temas y se guardan en Firestore (nube). Arturito interpreta el contenido y responde según la consulta del residente.</p>
           </div>
         </div>
       </section>
@@ -1157,7 +1157,7 @@ body.mode-client #adminApp{display:none!important}
           </form>
           <div class="firebase-config-card">
             <h3>Firebase Cloud</h3>
-            <p>Proyecto <strong>chatbots-hipodromo</strong>. Todo el conocimiento, tickets y configuración se respaldan en Firestore. Editable en tiempo real desde el panel.</p>
+            <p>Proyecto <strong>chatbots-hipodromo</strong>. Firestore: base <strong>artutitohipodromo02</strong>. Todo el conocimiento, tickets y configuración se respaldan en la nube. Editable en tiempo real desde el panel.</p>
             <form id="firebaseConfigForm" class="form-grid">
               <div class="form-group"><label>API Key</label><input type="text" id="fbApiKey" autocomplete="off" value="AIzaSyBocB2dUQCo2CB3rpFDWvsoUZzS1v-g5Qg"></div>
               <div class="form-group"><label>Auth Domain</label><input type="text" id="fbAuthDomain" value="chatbots-hipodromo.firebaseapp.com"></div>
@@ -1166,10 +1166,11 @@ body.mode-client #adminApp{display:none!important}
               <div class="form-group"><label>Messaging Sender ID</label><input type="text" id="fbMessagingSenderId" value="138621852452"></div>
               <div class="form-group"><label>App ID</label><input type="text" id="fbAppId" value="1:138621852452:web:43ee805662e0d39bf331b1"></div>
               <div class="form-group full"><label>ID Condominio (multi-tenant)</label><input type="text" id="fbCondominioId" value="hipodromo"></div>
+              <div class="form-group full"><label>Base de datos Firestore</label><input type="text" id="fbFirestoreDatabaseId" value="artutitohipodromo02" placeholder="artutitohipodromo02"></div>
               <div class="form-group full" style="display:flex;gap:.5rem;flex-wrap:wrap">
                 <button type="button" class="btn btn-secondary btn-sm" id="btnTestFirebase">Probar conexión</button>
                 <button type="submit" class="btn btn-primary btn-sm">Guardar y conectar</button>
-                <button type="button" class="btn btn-secondary btn-sm" id="btnMigrateCloud">Sincronizar local → nube</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnMigrateCloud">Publicar datos iniciales en nube</button>
               </div>
             </form>
           </div>
@@ -2285,7 +2286,8 @@ const ARTURITO_GADGET_KB_SEED = [
     storageBucket: 'chatbots-hipodromo.firebasestorage.app',
     messagingSenderId: '138621852452',
     appId: '1:138621852452:web:43ee805662e0d39bf331b1',
-    condominioId: 'hipodromo'
+    condominioId: 'hipodromo',
+    firestoreDatabaseId: 'artutitohipodromo02'
   };
 
   if (!global.__ARTURITO_FIREBASE_CONFIG__) {
@@ -2346,7 +2348,8 @@ const ARTURITO_GADGET_KB_SEED = [
             storageBucket: base.storageBucket,
             messagingSenderId: base.messagingSenderId,
             appId: base.appId,
-            condominioId: base.condominioId
+            condominioId: base.condominioId,
+            firestoreDatabaseId: saved.firestoreDatabaseId || base.firestoreDatabaseId || 'artutitohipodromo02'
           };
         }
       } catch (_) {}
@@ -2372,6 +2375,10 @@ const ARTURITO_GADGET_KB_SEED = [
 
     getCondominioId() {
       return this.condominioId || 'default';
+    }
+
+    getFirestoreDatabaseId() {
+      return this.firestoreDatabaseId || 'artutitohipodromo02';
     }
 
     col(name) {
@@ -2403,11 +2410,13 @@ const ARTURITO_GADGET_KB_SEED = [
         const { initializeApp, getAuth, getFirestore, getStorage } = this._modules;
         this.app = initializeApp(config);
         this.auth = getAuth(this.app);
-        this.db = getFirestore(this.app);
+        const dbId = config.firestoreDatabaseId || 'artutitohipodromo02';
+        this.db = getFirestore(this.app, dbId);
         this.storage = getStorage(this.app);
         this.enabled = true;
         this.condominioId = config.condominioId || config.projectId || 'default';
-        this.saveConfig({ ...config, condominioId: this.condominioId });
+        this.firestoreDatabaseId = dbId;
+        this.saveConfig({ ...config, condominioId: this.condominioId, firestoreDatabaseId: dbId });
         return true;
       } catch (err) {
         console.error('[FirebaseManager] init error:', err);
@@ -3240,9 +3249,9 @@ const ARTURITO_GADGET_KB_SEED = [
 
     /** Descarga KB y settings públicos desde el servidor (sin caché) */
     async pullPublicCloudData(database, forceServer = true) {
-      if (!this.fb.isEnabled()) return { settings: false, gadgetKB: false, knowledge: false, analytics: false };
+      if (!this.fb.isEnabled()) return { settings: false, gadgetKB: false, knowledge: false, analytics: false, training: false };
       const { getDoc, getDocFromServer, getDocs, getDocsFromServer } = this.fb._modules;
-      const changes = { settings: false, gadgetKB: false, knowledge: false, analytics: false };
+      const changes = { settings: false, gadgetKB: false, knowledge: false, analytics: false, training: false };
       const settingsRef = this.fb.doc(`condominios/${this._cid()}/settings/main`);
       try {
         let settingsSnap = null;
@@ -3290,6 +3299,7 @@ const ARTURITO_GADGET_KB_SEED = [
           this.applyUnifiedKnowledge(database);
         }
         if (await this.pullChatInteractions(database, forceServer)) changes.analytics = true;
+        if (await this.pullTrainingData(forceServer)) changes.training = true;
       } catch (err) {
         console.warn('[CloudSync] pullPublicCloudData:', err);
       }
@@ -3468,13 +3478,161 @@ const ARTURITO_GADGET_KB_SEED = [
 
     async migrateTrainingDocuments(documents) {
       if (!documents?.length) return;
-      await this.batchWrite('training_documents', documents, (d) => ({
-        nombreArchivo: d.name,
-        tipo: d.type || 'text/plain',
-        contenidoExtraido: d.content || d.text || '',
-        keywords: d.keywords || [],
-        fechaCarga: d.uploadedAt || Date.now()
-      }), (d) => d.id);
+      for (const d of documents) {
+        const topics = global.IDBModule?.topicsCache?.filter((t) => t.docId === d.id) || [];
+        await this.pushTrainingDocumentWithTopics(d, topics);
+      }
+    }
+
+    mapTrainingDocFromCloud(id, d) {
+      return {
+        id,
+        name: d.nombreArchivo || d.name || 'documento',
+        type: d.tipo || d.type || 'txt',
+        content: d.contenidoExtraido || d.content || '',
+        charCount: d.charCount || (d.contenidoExtraido || d.content || '').length,
+        size: d.size || 0,
+        topicCount: d.topicCount || 0,
+        extractedAt: d.extractedAt,
+        createdAt: d.createdAt || d.fechaCarga || Date.now()
+      };
+    }
+
+    mapTrainingDocToCloud(doc) {
+      return {
+        nombreArchivo: doc.name,
+        tipo: doc.type || 'text/plain',
+        contenidoExtraido: doc.content || '',
+        charCount: doc.charCount || (doc.content || '').length,
+        size: doc.size || 0,
+        topicCount: doc.topicCount || 0,
+        extractedAt: doc.extractedAt || Date.now(),
+        createdAt: doc.createdAt || Date.now(),
+        fechaCarga: doc.createdAt || Date.now(),
+        updatedAt: doc.updatedAt || Date.now()
+      };
+    }
+
+    mapTopicFromCloud(id, t) {
+      return {
+        id,
+        docId: t.docId,
+        docName: t.docName,
+        title: t.title,
+        content: t.content,
+        keywords: t.keywords || [],
+        category: t.category || 'General',
+        summary: t.summary || '',
+        keyPoints: t.keyPoints || [],
+        suggestedQuestions: t.suggestedQuestions || [],
+        confidence: t.confidence,
+        source: t.source || 'document',
+        tokens: t.tokens || [],
+        createdAt: t.createdAt || Date.now(),
+        updatedAt: t.updatedAt
+      };
+    }
+
+    mapTopicToCloud(topic) {
+      return {
+        docId: topic.docId,
+        docName: topic.docName,
+        title: topic.title,
+        content: topic.content,
+        keywords: topic.keywords || [],
+        category: topic.category || 'General',
+        summary: topic.summary || '',
+        keyPoints: topic.keyPoints || [],
+        suggestedQuestions: topic.suggestedQuestions || [],
+        confidence: topic.confidence,
+        source: topic.source || 'document',
+        tokens: topic.tokens || [],
+        createdAt: topic.createdAt || Date.now(),
+        updatedAt: topic.updatedAt || Date.now()
+      };
+    }
+
+    async pullTrainingData(forceServer = true) {
+      if (!this.fb.isEnabled()) return false;
+      const { getDocs, getDocsFromServer } = this.fb._modules;
+      let docsSnap;
+      let topicsSnap;
+      if (forceServer && getDocsFromServer) {
+        try {
+          [docsSnap, topicsSnap] = await Promise.all([
+            getDocsFromServer(this.fb.col('training_documents')),
+            getDocsFromServer(this.fb.col('topics'))
+          ]);
+        } catch (_) {}
+      }
+      if (!docsSnap || !topicsSnap) {
+        [docsSnap, topicsSnap] = await Promise.all([
+          getDocs(this.fb.col('training_documents')),
+          getDocs(this.fb.col('topics'))
+        ]);
+      }
+      global.IDBModule = global.IDBModule || window.IDBModule || {};
+      global.IDBModule.documentsCache = docsSnap.docs
+        .map((d) => this.mapTrainingDocFromCloud(d.id, d.data()))
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      global.IDBModule.topicsCache = topicsSnap.docs.map((d) => this.mapTopicFromCloud(d.id, d.data()));
+      global.IDBModule._stores = global.IDBModule._stores || { documents: new Map(), topics: new Map(), index_meta: new Map() };
+      global.IDBModule._stores.documents = new Map(global.IDBModule.documentsCache.map((d) => [d.id, d]));
+      global.IDBModule._stores.topics = new Map(global.IDBModule.topicsCache.map((t) => [t.id, t]));
+      return true;
+    }
+
+    async pushTrainingDocumentWithTopics(doc, topics = []) {
+      if (!this.fb.isEnabled()) throw new Error('Sin conexión a Firebase');
+      const { setDoc, doc: docRef, writeBatch } = this.fb._modules;
+      await setDoc(docRef(this.fb.col('training_documents'), doc.id), this.mapTrainingDocToCloud(doc), { merge: true });
+      if (!topics.length) return;
+      const batch = writeBatch(this.fb.db);
+      topics.forEach((t) => {
+        batch.set(docRef(this.fb.col('topics'), t.id), this.mapTopicToCloud(t), { merge: true });
+      });
+      await batch.commit();
+    }
+
+    async pushTrainingTopic(topic) {
+      if (!this.fb.isEnabled() || !topic?.id) throw new Error('Sin conexión a Firebase');
+      const { setDoc, doc: docRef } = this.fb._modules;
+      await setDoc(docRef(this.fb.col('topics'), topic.id), this.mapTopicToCloud(topic), { merge: true });
+    }
+
+    async deleteTrainingDocument(id) {
+      if (!this.fb.isEnabled()) throw new Error('Sin conexión a Firebase');
+      const { deleteDoc, doc: docRef, getDocs, query, where, writeBatch } = this.fb._modules;
+      await deleteDoc(docRef(this.fb.col('training_documents'), id));
+      try {
+        const snap = await getDocs(query(this.fb.col('topics'), where('docId', '==', id)));
+        if (!snap.empty) {
+          const batch = writeBatch(this.fb.db);
+          snap.docs.forEach((d) => batch.delete(d.ref));
+          await batch.commit();
+        }
+      } catch (err) {
+        console.warn('[CloudSync] deleteTrainingDocument topics:', err);
+      }
+    }
+
+    async deleteTrainingTopic(id) {
+      if (!this.fb.isEnabled()) throw new Error('Sin conexión a Firebase');
+      const { deleteDoc, doc: docRef } = this.fb._modules;
+      await deleteDoc(docRef(this.fb.col('topics'), id));
+    }
+
+    async clearAllTrainingDocuments() {
+      if (!this.fb.isEnabled()) throw new Error('Sin conexión a Firebase');
+      const { getDocs, writeBatch } = this.fb._modules;
+      const [docsSnap, topicsSnap] = await Promise.all([
+        getDocs(this.fb.col('training_documents')),
+        getDocs(this.fb.col('topics'))
+      ]);
+      const batch = writeBatch(this.fb.db);
+      docsSnap.docs.forEach((d) => batch.delete(d.ref));
+      topicsSnap.docs.forEach((d) => batch.delete(d.ref));
+      if (docsSnap.size || topicsSnap.size) await batch.commit();
     }
 
     async migrateLocalToCloud(database) {
@@ -3494,11 +3652,7 @@ const ARTURITO_GADGET_KB_SEED = [
         await this.tickets.syncCounterFromExisting();
       }
 
-      if (global.IDBModule?.documentsCache?.length) {
-        await this.migrateTrainingDocuments(global.IDBModule.documentsCache);
-      }
-
-      localStorage.setItem(CLOUD_SYNC_KEY, String(Date.now()));
+      localStorage.removeItem(CLOUD_SYNC_KEY);
       this._cloudKBActive = true;
       return { ok: true };
     }
@@ -3616,6 +3770,38 @@ const ARTURITO_GADGET_KB_SEED = [
         this._snapErr('chat_interactions')
       );
       this._unsubs.push(analyticsUnsub);
+
+      const trainingDocsUnsub = onSnapshot(
+        this.fb.col('training_documents'),
+        async (snap) => {
+          if (this._pushing) return;
+          global.IDBModule = global.IDBModule || window.IDBModule || {};
+          global.IDBModule.documentsCache = snap.docs
+            .map((d) => this.mapTrainingDocFromCloud(d.id, d.data()))
+            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+          global.IDBModule._stores = global.IDBModule._stores || { documents: new Map(), topics: new Map(), index_meta: new Map() };
+          global.IDBModule._stores.documents = new Map(global.IDBModule.documentsCache.map((d) => [d.id, d]));
+          await global.RAGModule?.rebuildIndex?.();
+          if (onUpdate) onUpdate('training');
+        },
+        this._snapErr('training_documents')
+      );
+      this._unsubs.push(trainingDocsUnsub);
+
+      const topicsUnsub = onSnapshot(
+        this.fb.col('topics'),
+        async (snap) => {
+          if (this._pushing) return;
+          global.IDBModule = global.IDBModule || window.IDBModule || {};
+          global.IDBModule.topicsCache = snap.docs.map((d) => this.mapTopicFromCloud(d.id, d.data()));
+          global.IDBModule._stores = global.IDBModule._stores || { documents: new Map(), topics: new Map(), index_meta: new Map() };
+          global.IDBModule._stores.topics = new Map(global.IDBModule.topicsCache.map((t) => [t.id, t]));
+          await global.RAGModule?.rebuildIndex?.();
+          if (onUpdate) onUpdate('training');
+        },
+        this._snapErr('topics')
+      );
+      this._unsubs.push(topicsUnsub);
 
       this.bindTicketsWatch(database, onUpdate);
     }
@@ -3738,7 +3924,7 @@ const ARTURITO_GADGET_KB_SEED = [
           const msg = lastErr.message || String(lastErr);
           global.toast?.(
             msg.includes('permission') || msg.includes('PERMISSION_DENIED')
-              ? 'Sin permiso en Firestore. Publica firestore.rules en Firebase Console (proyecto chatbots-hipodromo).'
+              ? 'Sin permiso en Firestore (base artutitohipodromo02). Publica firestore.rules: bash deploy-firebase.sh'
               : 'No se guardó en la nube. Revisa tu conexión e intenta de nuevo.',
             'error'
           );
@@ -3751,7 +3937,7 @@ const ARTURITO_GADGET_KB_SEED = [
 
     /** Al conectar: la nube manda siempre; sube semilla solo si Firestore está vacío */
     async bootstrap(database, callbacks = {}) {
-      if (!this.fb.isEnabled()) return { mode: 'local' };
+      if (!this.fb.isEnabled()) return { mode: 'offline' };
 
       if (!database.manualKnowledge) {
         database.manualKnowledge = (database.knowledge || []).filter((k) => k.origin !== 'gadget');
@@ -3798,6 +3984,7 @@ const ARTURITO_GADGET_KB_SEED = [
       if (changes.gadgetKB && onSync) { onSync('gadgetKB'); synced = true; }
       if (changes.knowledge && onSync) { onSync('knowledge'); synced = true; }
       if (changes.analytics && onSync) { onSync('analytics'); synced = true; }
+      if (changes.training && onSync) { onSync('training'); synced = true; }
       return synced;
     }
   }
@@ -3807,7 +3994,7 @@ const ARTURITO_GADGET_KB_SEED = [
     static setCloudBadge(connected, text) {
       const el = document.getElementById('cloudStatusBadge');
       if (!el) return;
-      el.textContent = text || (connected ? 'Cloud conectado' : 'Modo local');
+      el.textContent = text || (connected ? 'Nube conectada' : 'Sin nube');
       el.className = 'cloud-badge ' + (connected ? 'cloud-on' : 'cloud-off');
     }
 
@@ -3822,7 +4009,8 @@ const ARTURITO_GADGET_KB_SEED = [
         fbStorageBucket: 'storageBucket',
         fbMessagingSenderId: 'messagingSenderId',
         fbAppId: 'appId',
-        fbCondominioId: 'condominioId'
+        fbCondominioId: 'condominioId',
+        fbFirestoreDatabaseId: 'firestoreDatabaseId'
       };
       Object.entries(fieldMap).forEach(([id, key]) => {
         const el = document.getElementById(id);
@@ -3838,7 +4026,8 @@ const ARTURITO_GADGET_KB_SEED = [
           storageBucket: document.getElementById('fbStorageBucket').value.trim(),
           messagingSenderId: document.getElementById('fbMessagingSenderId').value.trim(),
           appId: document.getElementById('fbAppId').value.trim(),
-          condominioId: document.getElementById('fbCondominioId').value.trim() || document.getElementById('fbProjectId').value.trim()
+          condominioId: document.getElementById('fbCondominioId').value.trim() || document.getElementById('fbProjectId').value.trim(),
+          firestoreDatabaseId: document.getElementById('fbFirestoreDatabaseId')?.value.trim() || 'artutitohipodromo02'
         };
         try {
           await fb.init(config);
@@ -3860,7 +4049,8 @@ const ARTURITO_GADGET_KB_SEED = [
             storageBucket: document.getElementById('fbStorageBucket').value.trim(),
             messagingSenderId: document.getElementById('fbMessagingSenderId').value.trim(),
             appId: document.getElementById('fbAppId').value.trim(),
-            condominioId: document.getElementById('fbCondominioId').value.trim()
+            condominioId: document.getElementById('fbCondominioId').value.trim(),
+            firestoreDatabaseId: document.getElementById('fbFirestoreDatabaseId')?.value.trim() || 'artutitohipodromo02'
           };
           await fb.init(config);
           await fb.testConnection();
@@ -3908,8 +4098,11 @@ const ARTURITO_GADGET_KB_SEED = [
     UIManager,
     async init(options = {}) {
       let hasConfig = await fb.initFromStorage();
+      if (!hasConfig && fb.getDefaultConfig()?.apiKey) {
+        hasConfig = await fb.init(fb.getDefaultConfig());
+      }
       if (!hasConfig) {
-        UIManager.setCloudBadge(false, 'Modo local');
+        UIManager.setCloudBadge(false, 'Sin Firebase');
         return false;
       }
       try {
@@ -4222,16 +4415,16 @@ const DatabaseModule = {
     }
     if (typeof KnowledgeBaseModule !== 'undefined') KnowledgeBaseModule.syncFromGadget();
   },
-  /** Persiste en Firestore (UnifiedDataStore). scope: local = solo sesión | settings | gadgetKB | knowledge | analytics | full */
+  /** Persiste en Firestore (UnifiedDataStore). scope: local = solo estado de sesión (chat UI) | settings | gadgetKB | knowledge | analytics | full */
   async save(scope = 'local', options = {}) {
+    if (scope !== 'local' && (typeof ArturitoCloud === 'undefined' || !ArturitoCloud.store?.isCloud?.())) {
+      toast('Sin conexión a la nube. El cambio no se guardó.', 'error');
+      return { cloud: false, reason: 'offline' };
+    }
     if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.store) {
       return ArturitoCloud.store.persist(database, scope, options);
     }
-    if (scope !== 'local') {
-      toast('Firebase no disponible. El cambio no se guardó.', 'error');
-      return { cloud: false, reason: 'offline' };
-    }
-    return { cloud: false, memory: true };
+    return { cloud: false, memory: scope === 'local' };
   },
   /** Genera ID único */
   uid(prefix = 'id') { return prefix + '_' + Date.now() + '_' + Math.random().toString(36).substr(2,5); },
@@ -4372,91 +4565,67 @@ function formatChatShortcuts(shortcuts) {
   return (shortcuts || []).map(s => `${s.icon}:${s.text}`).join('\n');
 }
 
-/* ─── IDBModule — IndexedDB para documentos de entrenamiento ─── */
+/* ─── IDBModule — Caché en memoria (datos en Firestore artutitohipodromo02) ─── */
 const IDBModule = {
-  db: null,
-  DB_NAME: 'ArturitoAI_DB',
-  DB_VERSION: 3,
   documentsCache: [],
   topicsCache: [],
-  /** Inicializa IndexedDB */
+  _stores: { documents: new Map(), topics: new Map(), index_meta: new Map() },
+  /** Inicializa caché en memoria (sin IndexedDB) */
   async init() {
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open(this.DB_NAME, this.DB_VERSION);
-      req.onupgradeneeded = (e) => {
-        const db = e.target.result;
-        if (!db.objectStoreNames.contains('documents')) db.createObjectStore('documents', { keyPath: 'id' });
-        if (!db.objectStoreNames.contains('topics')) db.createObjectStore('topics', { keyPath: 'id' });
-        if (!db.objectStoreNames.contains('index_meta')) db.createObjectStore('index_meta', { keyPath: 'id' });
-        if (!db.objectStoreNames.contains('ticket_attachments')) db.createObjectStore('ticket_attachments', { keyPath: 'id' });
-      };
-      req.onsuccess = async () => {
-        this.db = req.result;
-        await this.refreshCache();
-        resolve();
-      };
-      req.onerror = () => reject(req.error);
-    });
+    this.documentsCache = [];
+    this.topicsCache = [];
+    this._stores = { documents: new Map(), topics: new Map(), index_meta: new Map() };
+    return true;
   },
-  /** Guarda un registro en un store */
+  _syncDocCache(item) {
+    const idx = this.documentsCache.findIndex((d) => d.id === item.id);
+    if (idx >= 0) this.documentsCache[idx] = item;
+    else this.documentsCache.unshift(item);
+    this.documentsCache.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  },
+  _syncTopicCache(item) {
+    const idx = this.topicsCache.findIndex((t) => t.id === item.id);
+    if (idx >= 0) this.topicsCache[idx] = item;
+    else this.topicsCache.push(item);
+  },
   put(store, item) {
-    return new Promise((resolve, reject) => {
-      const tx = this.db.transaction(store, 'readwrite');
-      tx.objectStore(store).put(item);
-      tx.oncomplete = () => resolve(item);
-      tx.onerror = () => reject(tx.error);
-    });
+    if (!this._stores[store]) this._stores[store] = new Map();
+    this._stores[store].set(item.id, item);
+    if (store === 'documents') this._syncDocCache(item);
+    if (store === 'topics') this._syncTopicCache(item);
+    return Promise.resolve(item);
   },
-  /** Obtiene un registro por id */
   get(store, id) {
-    return new Promise((resolve, reject) => {
-      const tx = this.db.transaction(store, 'readonly');
-      const req = tx.objectStore(store).get(id);
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => reject(req.error);
-    });
+    return Promise.resolve(this._stores[store]?.get(id) || null);
   },
-  /** Obtiene todos los registros de un store */
   getAll(store) {
-    return new Promise((resolve, reject) => {
-      const tx = this.db.transaction(store, 'readonly');
-      const req = tx.objectStore(store).getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => reject(req.error);
-    });
+    return Promise.resolve(Array.from(this._stores[store]?.values() || []));
   },
-  /** Elimina un registro */
   delete(store, id) {
-    return new Promise((resolve, reject) => {
-      const tx = this.db.transaction(store, 'readwrite');
-      tx.objectStore(store).delete(id);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
+    this._stores[store]?.delete(id);
+    if (store === 'documents') this.documentsCache = this.documentsCache.filter((d) => d.id !== id);
+    if (store === 'topics') this.topicsCache = this.topicsCache.filter((t) => t.id !== id);
+    return Promise.resolve();
   },
-  /** Limpia un store completo */
   clear(store) {
-    return new Promise((resolve, reject) => {
-      const tx = this.db.transaction(store, 'readwrite');
-      tx.objectStore(store).clear();
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
+    if (this._stores[store]) this._stores[store].clear();
+    if (store === 'documents') this.documentsCache = [];
+    if (store === 'topics') this.topicsCache = [];
+    return Promise.resolve();
   },
-  /** Refresca caché en memoria para búsqueda del chatbot */
   async refreshCache() {
     this.documentsCache = await this.getAll('documents');
-    this.documentsCache.sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+    this.documentsCache.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     this.topicsCache = await this.getAll('topics');
     return this.documentsCache;
   },
-  /** Elimina temas asociados a un documento */
   async deleteTopicsByDoc(docId) {
-    const toDelete = this.topicsCache.filter(t => t.docId === docId);
+    const toDelete = this.topicsCache.filter((t) => t.docId === docId);
     for (const t of toDelete) await this.delete('topics', t.id);
-    this.topicsCache = this.topicsCache.filter(t => t.docId !== docId);
+    this.topicsCache = this.topicsCache.filter((t) => t.docId !== docId);
   }
 };
+window.IDBModule = IDBModule;
 
 /* ─── DocExtractorModule — Extracción de texto multi-formato ─── */
 const DocExtractorModule = {
@@ -5071,7 +5240,7 @@ const RAGModule = {
     return [...expanded];
   },
 
-  /** Procesa documento: separa temas, analiza y guarda en IndexedDB */
+  /** Procesa documento: separa temas, analiza y guarda en Firestore */
   async processDocument(doc) {
     await IDBModule.deleteTopicsByDoc(doc.id);
     IDBModule.topicsCache = IDBModule.topicsCache.filter(t => t.docId !== doc.id);
@@ -5087,6 +5256,9 @@ const RAGModule = {
     await IDBModule.put('documents', doc);
     const idx = IDBModule.documentsCache.findIndex(d => d.id === doc.id);
     if (idx >= 0) IDBModule.documentsCache[idx] = doc; else IDBModule.documentsCache.unshift(doc);
+    if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.sync?.pushTrainingDocumentWithTopics) {
+      await ArturitoCloud.sync.pushTrainingDocumentWithTopics(doc, topics);
+    }
     return topics;
   },
 
@@ -5274,17 +5446,24 @@ const RAGModule = {
     await IDBModule.put('topics', topic);
     const idx = IDBModule.topicsCache.findIndex(t => t.id === topic.id);
     if (idx >= 0) IDBModule.topicsCache[idx] = topic; else IDBModule.topicsCache.push(topic);
+    if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.sync?.pushTrainingTopic) {
+      await ArturitoCloud.sync.pushTrainingTopic(topic);
+    }
     await this.rebuildIndex();
     return topic;
   },
 
-  /** Elimina un tema del índice */
+  /** Elimina un tema del índice y de Firestore */
   async deleteTopic(id) {
+    if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.sync?.deleteTrainingTopic) {
+      await ArturitoCloud.sync.deleteTrainingTopic(id);
+    }
     await IDBModule.delete('topics', id);
     IDBModule.topicsCache = IDBModule.topicsCache.filter(t => t.id !== id);
     await this.rebuildIndex();
   }
 };
+window.RAGModule = RAGModule;
 
 /* ─── GadgetKBModule — Base de conocimiento Arturito Gadget ─── */
 const GadgetKBModule = {
@@ -7619,6 +7798,7 @@ const TicketEmailDebug = {
         this.warn('Sin SMTP en Firestore', 'Los tickets se guardan pero el correo NO llegará hasta configurar Gmail en el panel admin.');
       }
       this.log('Config Firestore (settings/main)', {
+        database: ArturitoCloud.fb?.getFirestoreDatabaseId?.() || 'artutitohipodromo02',
         path: `condominios/${cloud.cid}/settings/main`,
         notifyAdminEmail: s.notifyAdminEmail || '(vacío)',
         smtpConnectionUri: this._maskUri(s.smtpConnectionUri),
@@ -7656,7 +7836,7 @@ const TicketEmailDebug = {
 };
 window.TicketEmailDebug = TicketEmailDebug;
 
-/* ─── TicketAttachmentModule — Adjuntos locales (IDB) + nube (Storage URL) ─── */
+/* ─── TicketAttachmentModule — Adjuntos en Firebase Storage ─── */
 const TicketAttachmentModule = {
   MAX_FILES: 5,
   MAX_SIZE: 5 * 1024 * 1024,
@@ -7695,38 +7875,44 @@ const TicketAttachmentModule = {
   },
 
   async save(ticketId, file) {
+    if (typeof ArturitoCloud === 'undefined' || !ArturitoCloud.storage?.upload) {
+      throw new Error('Sin conexión a la nube');
+    }
     const err = this.validateFile(file);
     if (err) throw new Error(err);
-    const id = DatabaseModule.uid('att');
-    const data = await readFileBuffer(file);
-    const record = {
-      id, ticketId,
-      name: file.name,
-      mimeType: file.type || 'application/octet-stream',
-      size: file.size,
-      data,
-      createdAt: Date.now()
-    };
-    await IDBModule.put('ticket_attachments', record);
-    return { id, name: record.name, mimeType: record.mimeType, size: record.size, createdAt: record.createdAt };
+    const safeName = String(file.name || 'archivo').replace(/[/\\]/g, '_');
+    const path = ArturitoCloud.storage.pathTicket(ArturitoCloud.fb.getCondominioId(), ticketId, `${Date.now()}_${safeName}`);
+    const meta = await ArturitoCloud.storage.upload(file, path);
+    return this.normalize(meta);
   },
 
   async listMeta(ticketId) {
-    const all = await IDBModule.getAll('ticket_attachments');
-    return all.filter(a => a.ticketId === ticketId).map(({ id, name, mimeType, size, createdAt }) => ({ id, name, mimeType, size, createdAt }));
+    const ticket = database.tickets.find((t) => t.id === ticketId);
+    return (ticket?.attachments || []).map((a) => this.normalize(a)).filter(Boolean);
   },
 
   async getOne(id) {
-    return IDBModule.get('ticket_attachments', id);
+    for (const t of database.tickets || []) {
+      const found = (t.attachments || []).find((a) => a.id === id);
+      if (found) return this.normalize(found);
+    }
+    return null;
   },
 
   async delete(id) {
-    await IDBModule.delete('ticket_attachments', id);
+    const att = await this.getOne(id);
+    if (att?.storagePath && typeof ArturitoCloud !== 'undefined' && ArturitoCloud.storage?.deletePath) {
+      try { await ArturitoCloud.storage.deletePath(att.storagePath); } catch (err) {
+        console.warn('[Ticket] delete attachment storage:', err);
+      }
+    }
   },
 
   async deleteByTicket(ticketId) {
-    const all = await IDBModule.getAll('ticket_attachments');
-    for (const a of all.filter(x => x.ticketId === ticketId)) await this.delete(a.id);
+    const ticket = database.tickets.find((t) => t.id === ticketId);
+    for (const att of ticket?.attachments || []) {
+      await this.delete(att.id);
+    }
   },
 
   download(att) {
@@ -7880,10 +8066,7 @@ const TicketModule = {
   },
   async loadAttachments(ticketId) {
     this._pendingFiles = [];
-    const ticket = database.tickets.find(t => t.id === ticketId);
-    const cloud = (ticket?.attachments || []).map(a => TicketAttachmentModule.normalize(a)).filter(Boolean);
-    const local = ticketId ? (await TicketAttachmentModule.listMeta(ticketId)).map(a => TicketAttachmentModule.normalize(a)) : [];
-    this._savedAttachments = cloud.length ? cloud : local;
+    this._savedAttachments = (await TicketAttachmentModule.listMeta(ticketId)).map((a) => TicketAttachmentModule.normalize(a)).filter(Boolean);
     this.renderAttachmentList();
   },
   _downloadBtnAttrs(att) {
@@ -8035,10 +8218,8 @@ const TicketModule = {
               console.warn('[Cloud] ticket append attachments:', err);
               toast('No se pudieron subir todos los adjuntos a la nube', 'warning');
             }
-          } else {
-            await this.persistPendingFiles(editId);
-            const idb = await TicketAttachmentModule.listMeta(editId);
-            if (idb.length) attachments = idb.map(a => TicketAttachmentModule.normalize(a));
+          } else if (this._pendingFiles.length) {
+            toast('Sin conexión a la nube — no se pudieron subir adjuntos', 'error');
           }
           database.tickets[idx] = { ...database.tickets[idx], ...data, attachments };
           if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled()) {
@@ -8094,15 +8275,12 @@ const TicketModule = {
             return;
           }
         } else {
-          TicketEmailDebug.warn('Firebase desconectado — ticket solo en memoria, NO habrá correo al admin');
-          cloudSaved = true;
+          TicketEmailDebug.warn('Firebase desconectado — no se puede crear ticket sin la nube');
+          toast('Sin conexión a la nube. No se puede registrar la solicitud.', 'error');
+          return;
         }
         if (!cloudSaved) return;
         database.tickets.unshift(ticket);
-        if (!ticket.attachments.length) {
-          const newMetas = await this.persistPendingFiles(newId);
-          ticket.attachments = newMetas.length ? await TicketAttachmentModule.listMeta(newId) : [];
-        }
         if (pendingCount && !ticket.attachments.length) {
           toast('La solicitud se registró, pero los adjuntos no se subieron. Publica storage.rules en Firebase e intenta de nuevo.', 'warning');
         }
@@ -8308,7 +8486,7 @@ const TrainingModule = {
     this.renderGadgetKB();
     this.renderCategoryOrderList();
     this.refreshChatTopicOrder();
-    toast(r.cloud ? 'Categoría guardada y sincronizada en la nube' : 'Categoría guardada localmente', r.cloud ? 'success' : 'warning');
+    toast(r.cloud ? 'Categoría guardada en la nube' : 'Sin conexión — no se guardó en la nube', r.cloud ? 'success' : 'error');
   },
   async removeGadgetCategory(key) {
     const c = GadgetKBModule.getCategories()[key];
@@ -8328,7 +8506,7 @@ const TrainingModule = {
     this.renderCategoryOrderList();
     this.refreshChatTopicOrder();
     const note = r.movedTopics ? ` (${r.movedTopics} tema(s) reasignados)` : '';
-    toast((r.cloud ? 'Categoría eliminada de la nube' : 'Categoría eliminada localmente') + note, 'success');
+    toast((r.cloud ? 'Categoría eliminada de la nube' : 'Sin conexión — no se eliminó de la nube') + note, r.cloud ? 'success' : 'error');
   },
   /** Inicializa pestañas de entrenamiento */
   initTabs() {
@@ -8361,6 +8539,10 @@ const TrainingModule = {
   async handleFiles(fileList) {
     const files = Array.from(fileList || []);
     if (!files.length) return;
+    if (typeof ArturitoCloud === 'undefined' || !ArturitoCloud.fb?.isEnabled()) {
+      toast('Sin conexión a la nube — no se pueden subir documentos', 'error');
+      return;
+    }
     const prog = document.getElementById('uploadProgress');
     const fill = document.getElementById('uploadProgressFill');
     prog.classList.add('show');
@@ -8438,28 +8620,42 @@ const TrainingModule = {
     document.getElementById('docPreviewContent').innerHTML = html + escapeHtml((doc.content || '').substring(0, 6000)) + ((doc.content||'').length > 6000 ? '\n\n[... truncado ...]' : '');
     openModal('modalDocPreview');
   },
-  /** Elimina documento de IndexedDB */
+  /** Elimina documento de Firestore */
   async removeDoc(id) {
     if (!confirm('¿Eliminar este documento y sus temas indexados?')) return;
-    await IDBModule.deleteTopicsByDoc(id);
-    await IDBModule.delete('documents', id);
-    await IDBModule.refreshCache();
-    await RAGModule.rebuildIndex();
-    await this.renderDocuments();
-    this.renderTopics();
-    this.renderStats();
-    toast('Documento y temas eliminados', 'info');
+    try {
+      if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.sync?.deleteTrainingDocument) {
+        await ArturitoCloud.sync.deleteTrainingDocument(id);
+      }
+      await IDBModule.deleteTopicsByDoc(id);
+      await IDBModule.delete('documents', id);
+      await IDBModule.refreshCache();
+      await RAGModule.rebuildIndex();
+      await this.renderDocuments();
+      this.renderTopics();
+      this.renderStats();
+      toast('Documento eliminado de la nube', 'info');
+    } catch (err) {
+      toast('No se pudo eliminar en la nube: ' + (err.message || err), 'error');
+    }
   },
-  /** Elimina todos los documentos */
+  /** Elimina todos los documentos de la nube */
   async clearAllDocs() {
-    if (!confirm('¿Eliminar TODOS los documentos y temas de IndexedDB?')) return;
-    await IDBModule.clear('topics');
-    await IDBModule.clear('documents');
-    await IDBModule.refreshCache();
-    await RAGModule.rebuildIndex();
-    await this.renderDocuments();
-    this.renderStats();
-    toast('Base documental limpiada', 'info');
+    if (!confirm('¿Eliminar TODOS los documentos y temas de la nube?')) return;
+    try {
+      if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.sync?.clearAllTrainingDocuments) {
+        await ArturitoCloud.sync.clearAllTrainingDocuments();
+      }
+      await IDBModule.clear('topics');
+      await IDBModule.clear('documents');
+      await IDBModule.refreshCache();
+      await RAGModule.rebuildIndex();
+      await this.renderDocuments();
+      this.renderStats();
+      toast('Base documental eliminada de la nube', 'info');
+    } catch (err) {
+      toast('Error al limpiar la nube: ' + (err.message || err), 'error');
+    }
   },
   /** Reindexa y reconstruye temas */
   async reindex() {
@@ -8580,7 +8776,7 @@ const TrainingModule = {
   },
   async moveGadgetTopic(id, dir) {
     const r = await GadgetKBModule.moveTopic(id, dir);
-    if (r?.cloud === false && r?.reason !== 'syncing') toast('Orden guardado localmente; se sincronizará en la nube al reconectar.', 'warning');
+    if (r?.cloud === false && r?.reason !== 'syncing') toast('Sin conexión a la nube — el orden no se guardó.', 'error');
     this.renderGadgetKB();
     this.refreshChatTopicOrder();
   },
@@ -8886,8 +9082,11 @@ const TrainingModule = {
       if (topics.length) this.openTopicAnalysis(doc.id);
     } else {
       await IDBModule.put('documents', doc);
+      if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.sync?.pushTrainingDocumentWithTopics) {
+        await ArturitoCloud.sync.pushTrainingDocumentWithTopics(doc, RAGModule.getTopicsByDoc(doc.id));
+      }
       await RAGModule.rebuildIndex();
-      toast('Documento actualizado', 'success');
+      toast('Documento actualizado en la nube', 'success');
     }
     closeModal('modalDocument');
     await this.renderDocuments();
@@ -8944,6 +9143,9 @@ const TrainingModule = {
       topic.tokens = RAGModule.tokenize(topic.title + ' ' + topic.content);
       await IDBModule.put('topics', topic);
       IDBModule.topicsCache.push(topic);
+      if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.sync?.pushTrainingTopic) {
+        await ArturitoCloud.sync.pushTrainingTopic(topic);
+      }
       await RAGModule.rebuildIndex();
     }
     closeModal('modalTopic');
@@ -9560,6 +9762,14 @@ const App = {
         TrainingModule.renderStats?.();
       }
     }
+    if (type === 'training') {
+      await RAGModule.rebuildIndex();
+      if (this.mode === 'admin') {
+        TrainingModule.renderDocuments?.();
+        TrainingModule.renderTopics?.();
+        TrainingModule.renderStats?.();
+      }
+    }
     if (type === 'tickets') {
       if (this.mode === 'admin') {
         TicketModule.render();
@@ -9634,7 +9844,7 @@ const App = {
       } catch (err) {
         console.warn('[ArturitoCloud] init falló:', err);
         ArturitoCloud.UIManager.setCloudBadge(false, 'Error Firebase');
-        this.showCloudSyncLoading(true, 'Sin conexión a la nube', 'Publica firestore.rules en Firebase Console (proyecto chatbots-hipodromo) o revisa tu internet.');
+        this.showCloudSyncLoading(true, 'Sin conexión a la nube', 'Publica firestore.rules en la base artutitohipodromo02 (bash deploy-firebase.sh) o revisa tu internet.');
         await new Promise(r => setTimeout(r, 2200));
       }
     } else {
@@ -9648,8 +9858,9 @@ const App = {
       this.showCloudSyncLoading(false);
       void TicketEmailDebug.audit('Al cargar la app');
     } else {
-      this.showCloudSyncLoading(false);
-      toast('No se pudo conectar con Firestore. Todos los datos viven en la nube.', 'error');
+      this.showCloudSyncLoading(true, 'Conexión a la nube requerida',
+        'Todos los datos están en Firestore (artutitohipodromo02). Ejecuta bash deploy-firebase.sh, verifica internet y recarga.');
+      return;
     }
 
     SettingsModule.apply();
