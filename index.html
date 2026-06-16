@@ -652,6 +652,15 @@ body.mode-client #adminApp{display:none!important}
 #modalTicket #btnTicketAttach{color:var(--arturito-green-dark);border-color:rgba(127,186,2,.35);background:rgba(127,186,2,.1)}
 #modalTicket #btnTicketAttach:hover:not(:disabled){background:rgba(127,186,2,.18);border-color:var(--arturito-green)}
 #modalTicket .ticket-hint{font-size:.72rem;color:#6b7280;line-height:1.35}
+.mail-badge{display:inline-flex;align-items:center;gap:.25rem;padding:.2rem .5rem;border-radius:999px;font-size:.72rem;font-weight:700;white-space:nowrap}
+.mail-badge-pending{background:#fef3c7;color:#92400e}
+.mail-badge-sent{background:#d1fae5;color:#065f46}
+.mail-badge-error{background:#fee2e2;color:#991b1b}
+.mail-badge-none{background:#f3f4f6;color:#6b7280}
+.ticket-email-panel{margin-top:.75rem;padding:.75rem;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);font-size:.82rem}
+.ticket-email-panel h4{margin:0 0 .5rem;font-size:.85rem;color:var(--primary)}
+.ticket-email-log{max-height:120px;overflow-y:auto;margin:.5rem 0 0;padding:0;list-style:none}
+.ticket-email-log li{padding:.25rem 0;border-bottom:1px dashed var(--border);font-size:.78rem;color:var(--text-muted)}
 #modalTicket .btn-primary .ui-icon,#modalTicket .btn-primary svg{color:#fff}
 @media(max-width:520px){
   #modalTicket .modal.ticket-modal{border-radius:20px 20px 16px 16px;max-height:calc(100dvh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - .5rem)}
@@ -928,7 +937,7 @@ body.mode-client #adminApp{display:none!important}
           <div class="table-wrap"><table id="ticketsTable"><thead><tr>
             <th data-sort="id">ID</th><th data-sort="nombre">Nombre</th><th data-sort="departamento">Depto</th>
             <th data-sort="categoria">Categoría</th><th data-sort="prioridad">Prioridad</th><th data-sort="estado">Estado</th>
-            <th data-sort="createdAt">Fecha</th><th>Acciones</th>
+            <th>Correo</th><th data-sort="createdAt">Fecha</th><th>Acciones</th>
           </tr></thead><tbody id="ticketsBody"></tbody></table></div>
         </div>
       </section>
@@ -944,7 +953,7 @@ body.mode-client #adminApp{display:none!important}
           </div>
           <div class="table-wrap"><table id="adminTable"><thead><tr>
             <th data-sort="id">ID</th><th data-sort="nombre">Residente</th><th data-sort="categoria">Categoría</th>
-            <th data-sort="prioridad">Prioridad</th><th data-sort="estado">Estado</th><th data-sort="createdAt">Fecha</th><th>Acciones</th>
+            <th data-sort="prioridad">Prioridad</th><th data-sort="estado">Estado</th><th>Correo</th><th data-sort="createdAt">Fecha</th><th>Acciones</th>
           </tr></thead><tbody id="adminBody"></tbody></table></div>
         </div>
       </section>
@@ -1218,6 +1227,12 @@ body.mode-client #adminApp{display:none!important}
       </div>
     </div>
     <div class="form-group" id="ticketStatusGroup" style="display:none"><label>Estado</label><select id="tEstado"></select></div>
+    <div class="form-group full ticket-email-panel" id="ticketEmailPanel" style="display:none">
+      <h4>Estado del correo</h4>
+      <div id="ticketEmailStatus">—</div>
+      <ul class="ticket-email-log" id="ticketEmailLog"></ul>
+      <button type="button" class="btn btn-secondary btn-sm" id="btnResendTicketEmail" style="margin-top:.5rem">Reenviar correo</button>
+    </div>
     <div class="form-group full ticket-modal-actions">
       <button type="button" class="btn btn-secondary" data-close="modalTicket">Cancelar</button>
       <button type="submit" class="btn btn-primary"><span data-icon="send" data-icon-size="sm"></span> Enviar solicitud</button>
@@ -2771,7 +2786,7 @@ const ARTURITO_GADGET_KB_SEED = [
       try {
         mailId = await global.TicketEmailDebug?.queueMailForTicket?.(id, localTicket);
         if (mailId) {
-          global.toast?.(`Ticket ${id} — correo encolado en mail/${mailId}`, 'success');
+          global.TicketEmailDebug?.log('Correo encolado', { path: `mail/${mailId}`, database: 'artutitohipodromo02' });
         }
       } catch (err) {
         console.warn('[TicketEmail] queue mail/ desde app:', err);
@@ -7850,6 +7865,112 @@ const TicketEmailDebug = {
       return { ok: false, error: err.message };
     }
   },
+  _mailCache: {},
+  parseDelivery(data) {
+    const d = data?.delivery || {};
+    if (d.success === true || d.state === 'SUCCESS' || d.state === 'DELIVERED') {
+      return { status: 'sent', label: 'Enviado', cls: 'mail-badge-sent', detail: d.error || d.messageId || '' };
+    }
+    if (d.success === false || d.state === 'ERROR' || d.state === 'FAILED' || d.error) {
+      return { status: 'error', label: 'Error', cls: 'mail-badge-error', detail: d.error || 'Error SMTP' };
+    }
+    if (d.state === 'PROCESSING') {
+      return { status: 'pending', label: 'Enviando…', cls: 'mail-badge-pending', detail: '' };
+    }
+    if (data?.meta?.ticketId) {
+      return { status: 'pending', label: 'Pendiente', cls: 'mail-badge-pending', detail: 'Esperando Cloud Function' };
+    }
+    return { status: 'none', label: 'Sin cola', cls: 'mail-badge-none', detail: '' };
+  },
+  mailBadgeHtml(ticketId) {
+    const cached = this._mailCache[ticketId];
+    const p = cached ? this.parseDelivery(cached) : { label: '…', cls: 'mail-badge-none' };
+    return `<span class="mail-badge ${p.cls}" title="${this._escapeHtml(p.detail || p.label)}">${p.label}</span>`;
+  },
+  async fetchMailStatus(ticketId) {
+    if (!ticketId || typeof ArturitoCloud === 'undefined' || !ArturitoCloud.fb?.isEnabled()) return null;
+    try {
+      const { doc, getDoc } = ArturitoCloud.fb._modules;
+      const snap = await getDoc(doc(ArturitoCloud.fb.db, 'mail', ticketId));
+      if (!snap.exists()) {
+        this._mailCache[ticketId] = null;
+        return null;
+      }
+      this._mailCache[ticketId] = snap.data();
+      return snap.data();
+    } catch (err) {
+      console.warn('[TicketEmail] fetchMailStatus', err);
+      return null;
+    }
+  },
+  async prefetchMailStatuses(ticketIds) {
+    await Promise.all((ticketIds || []).slice(0, 50).map((id) => this.fetchMailStatus(id)));
+  },
+  async loadMailLogs(ticketId) {
+    if (!ticketId || typeof ArturitoCloud === 'undefined' || !ArturitoCloud.fb?.isEnabled()) return [];
+    try {
+      const { collection, query, where, orderBy, limit, getDocs } = ArturitoCloud.fb._modules;
+      const q = query(
+        collection(ArturitoCloud.fb.db, 'logs', 'mail', 'entries'),
+        where('ticketId', '==', ticketId),
+        orderBy('createdAt', 'desc'),
+        limit(10)
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    } catch (err) {
+      console.warn('[TicketEmail] loadMailLogs', err);
+      return [];
+    }
+  },
+  async renderTicketEmailPanel(ticketId, ticket) {
+    const panel = document.getElementById('ticketEmailPanel');
+    const statusEl = document.getElementById('ticketEmailStatus');
+    const logEl = document.getElementById('ticketEmailLog');
+    if (!panel || !ticketId) return;
+    panel.style.display = '';
+    const data = await this.fetchMailStatus(ticketId);
+    const p = this.parseDelivery(data || { meta: { ticketId } });
+    const sentAt = data?.delivery?.sentAt;
+    const sentStr = sentAt?.toDate ? sentAt.toDate().toLocaleString('es-CL') : (data?.delivery?.at?.toDate?.()?.toLocaleString?.('es-CL') || '—');
+    statusEl.innerHTML = `
+      <span class="mail-badge ${p.cls}">${p.label}</span>
+      <div style="margin-top:.35rem;color:var(--text-muted);font-size:.78rem">
+        Ruta: <code>mail/${this._escapeHtml(ticketId)}</code> · Base artutitohipodromo02<br>
+        ${p.status === 'sent' ? `Enviado: ${sentStr}` : ''}
+        ${p.status === 'error' ? `Error: ${this._escapeHtml(p.detail)}` : ''}
+        ${p.status === 'pending' ? 'Despliega Functions: bash deploy.sh' : ''}
+      </div>`;
+    const logs = await this.loadMailLogs(ticketId);
+    logEl.innerHTML = logs.length
+      ? logs.map((l) => {
+          const when = l.createdAt?.toDate ? l.createdAt.toDate().toLocaleString('es-CL') : '—';
+          return `<li>${when} · ${l.success ? '✓ Enviado' : '✗ ' + this._escapeHtml(l.error || 'falló')} → ${this._escapeHtml(l.to || '')}</li>`;
+        }).join('')
+      : '<li>Sin historial en logs/mail/entries</li>';
+    const btn = document.getElementById('btnResendTicketEmail');
+    if (btn) {
+      btn.onclick = () => this.resendMailForTicket(ticketId, ticket);
+    }
+  },
+  async resendMailForTicket(ticketId, ticket) {
+    if (!ticketId) return;
+    const t = ticket || database.tickets.find((x) => x.id === ticketId);
+    if (!t) { toast('Ticket no encontrado', 'error'); return; }
+    if (!confirm('¿Reenviar correo de notificación para ' + ticketId + '?')) return;
+    try {
+      const { deleteDoc, doc } = ArturitoCloud.fb._modules;
+      if (ArturitoCloud.fb.auth?.currentUser) {
+        try { await deleteDoc(doc(ArturitoCloud.fb.db, 'mail', ticketId)); } catch (_) {}
+      }
+      await this.queueMailForTicket(ticketId, t);
+      toast('Correo reencolado en mail/' + ticketId, 'success');
+      void this.watchMailDelivery(ticketId, 20, true);
+      await this.renderTicketEmailPanel(ticketId, t);
+    } catch (err) {
+      toast('No se pudo reenviar: ' + (err.message || err), 'error');
+    }
+  },
   _escapeHtml(value) {
     return String(value ?? '')
       .replace(/&/g, '&amp;')
@@ -7952,75 +8073,60 @@ const TicketEmailDebug = {
     void this.watchMailDelivery(ticketId);
     return ticketId;
   },
-  /** Espera el campo delivery que escribe processMailQueue (Cloud Function) */
-  async watchMailDelivery(mailId, maxAttempts = 15) {
+  /** Espera delivery (processMailQueue) y muestra toast al usuario */
+  async watchMailDelivery(mailId, maxAttempts = 15, notifyUser = false) {
     if (!mailId || typeof ArturitoCloud === 'undefined' || !ArturitoCloud.fb?.isEnabled()) return;
     const { doc, getDoc } = ArturitoCloud.fb._modules;
     const ref = doc(ArturitoCloud.fb.db, 'mail', mailId);
     const dbId = ArturitoCloud.fb.getFirestoreDatabaseId?.() || 'artutitohipodromo02';
-    this.log('Esperando processMailQueue (Cloud Function)…', { mailId, database: dbId });
+    this.log('Esperando processMailQueue…', { mailId, database: dbId });
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((r) => setTimeout(r, 2000));
       try {
         const snap = await getDoc(ref);
         if (!snap.exists()) continue;
         const data = snap.data() || {};
+        this._mailCache[mailId] = data;
         const delivery = data.delivery;
         if (!delivery) continue;
-        if (delivery.state === 'SUCCESS' || delivery.state === 'DELIVERED') {
-          this.log('✓ Correo enviado', { mailId, processedBy: delivery.processedBy || 'processMailQueue', delivery });
+        const p = this.parseDelivery(data);
+        if (p.status === 'sent') {
+          this.log('✓ Correo enviado', { mailId, delivery });
+          if (notifyUser) toast('Correo enviado correctamente.', 'success');
           return { ok: true, delivery };
         }
-        if (delivery.state === 'ERROR' || delivery.state === 'FAILED' || delivery.error) {
-          this.warn('✗ No se pudo enviar el correo', {
-            mailId,
-            state: delivery.state,
-            error: delivery.error || delivery.info || delivery
-          });
-          this.warn('Solución', 'bash deploy.sh — revisa SMTP en settings/main o functions/.env');
+        if (p.status === 'error') {
+          this.warn('✗ No se pudo enviar el correo', { mailId, error: p.detail, delivery });
+          if (notifyUser) {
+            toast('El ticket fue creado pero el correo no pudo enviarse.', 'warning');
+            toast(String(p.detail || 'Error SMTP'), 'error');
+          }
           return { ok: false, delivery };
         }
-        if (delivery.state === 'PENDING' || delivery.state === 'PROCESSING') continue;
-        this.log('Estado delivery', delivery);
+        if (delivery.state === 'PROCESSING') continue;
       } catch (err) {
         const denied = err?.code === 'permission-denied' || /permission/i.test(String(err.message));
         if (denied) {
-          this.warn('Diagnóstico mail/ bloqueado por reglas', {
-            mailId,
-            database: dbId,
-            solucion: 'Publica firestore.rules: bash deploy.sh (base artutitohipodromo02)'
-          });
-          this.log('El ticket SÍ se encoló en mail/. Revisa delivery en Firebase Console → Firestore → artutitohipodromo02 → mail/' + mailId);
+          this.warn('Diagnóstico mail/ bloqueado por reglas', { mailId, database: dbId });
+          if (notifyUser) toast('Ticket creado. Publica reglas: bash deploy.sh', 'warning');
           return { ok: false, permission: true };
         }
         this.warn('Error leyendo mail/' + mailId, err.message);
         return { ok: false, error: err.message };
       }
     }
-    this.warn('Sin campo delivery en 30 s — revisa en Firebase Console', {
-      mailId,
-      path: `mail/${mailId}`,
-      database: dbId,
-      causas: [
-        'Cloud Function processMailQueue no desplegada o falló al arrancar',
-        'Firebase Console → Functions → processMailQueue → Logs',
-        'Abre mail/' + mailId + ' y mira delivery.error; SMTP en settings/main'
-      ]
-    });
+    this.warn('Sin delivery — despliega Functions (bash deploy.sh)', { mailId, path: `mail/${mailId}`, database: dbId });
+    if (notifyUser) {
+      toast('El correo está pendiente. Ejecuta bash deploy.sh para activar el envío.', 'warning');
+    }
     return { ok: false, timeout: true };
   },
   async afterTicketCreated(ticketId, ticket) {
-    this.log('✓ Ticket creado — correo en mail/' + ticketId, {
-      ticketId,
-      firestorePath: typeof ArturitoCloud !== 'undefined'
-        ? `condominios/${ArturitoCloud.fb.getCondominioId()}/tickets/${ticketId}`
-        : ticketId,
-      mailPath: `mail/${ticketId}`,
-      solicitante: ticket?.email,
-      categoria: ticket?.categoria,
-      deploy: 'Si no llega el correo: bash deploy.sh (Cloud Function processMailQueue)'
-    });
+    this.log('✓ Ticket creado — mail/' + ticketId, { ticketId, mailPath: `mail/${ticketId}`, database: 'artutitohipodromo02' });
+    toast('Ticket creado correctamente.', 'success');
+    const result = await this.watchMailDelivery(ticketId, 15, true);
     await this.audit('Post-creación ticket');
+    return result;
   }
 };
 window.TicketEmailDebug = TicketEmailDebug;
@@ -8235,18 +8341,20 @@ const TicketModule = {
     });
   },
   /** Renderiza tabla de tickets */
-  render() {
+  async render() {
     const tickets = this.getFiltered('ticketSearch','ticketFilterCat','ticketFilterStatus','ticketFilterPriority');
+    await TicketEmailDebug.prefetchMailStatuses(tickets.map((t) => t.id));
     const tbody = document.getElementById('ticketsBody');
     tbody.innerHTML = tickets.length ? tickets.map(t => {
       const attCount = TicketAttachmentModule.countForTicket(t);
       return `<tr>
       <td><strong>${t.id}</strong>${attCount ? ` <span title="${attCount} adjunto(s)" style="opacity:.75">${icon('document','sm')}</span>` : ''}</td><td>${t.nombre}</td><td>${t.departamento}</td>
       <td>${t.categoria}</td><td>${badgePriority(t.prioridad)}</td><td>${badgeStatus(t.estado)}</td>
+      <td>${TicketEmailDebug.mailBadgeHtml(t.id)}</td>
       <td>${fmtDate(t.createdAt)}</td>
       <td>${actionBtn('edit', `TicketModule.openEdit('${t.id}')`, 'Editar')}${actionBtn('trash', `TicketModule.remove('${t.id}')`, 'Eliminar', true)}</td>
     </tr>`;
-    }).join('') : '<tr><td colspan="8"><div class="empty-state">No hay tickets</div></td></tr>';
+    }).join('') : '<tr><td colspan="9"><div class="empty-state">No hay tickets</div></td></tr>';
   },
   resetAttachments() {
     this._pendingFiles = [];
@@ -8351,6 +8459,8 @@ const TicketModule = {
     document.getElementById('ticketModalTitle').textContent = 'Nueva solicitud';
     document.getElementById('ticketEditId').value = '';
     document.getElementById('ticketStatusGroup').style.display = 'none';
+    const emailPanel = document.getElementById('ticketEmailPanel');
+    if (emailPanel) emailPanel.style.display = 'none';
     document.getElementById('ticketForm').reset();
     this.resetAttachments();
     this.setModalPresentation('create');
@@ -8375,6 +8485,7 @@ const TicketModule = {
     document.getElementById('tEstado').value = t.estado;
     document.getElementById('tDescripcion').value = t.descripcion;
     await this.loadAttachments(t.id);
+    await TicketEmailDebug.renderTicketEmailPanel(t.id, t);
     openModal('modalTicket');
     hydrateIcons(document.getElementById('modalTicket'));
   },
@@ -8469,7 +8580,6 @@ const TicketModule = {
         if (pendingCount && !ticket.attachments.length) {
           toast('La solicitud se registró, pero los adjuntos no se subieron. Publica storage.rules en Firebase e intenta de nuevo.', 'warning');
         }
-        toast('Ticket creado: ' + newId, 'success');
         if (App.mode === 'client' && ChatModule.getCurrent()) {
           const attNote = ticket.attachments.length ? ` Se adjuntaron ${ticket.attachments.length} documento(s).` : '';
           ChatModule.addBotMessage('Tu solicitud ' + newId + ' fue registrada.' + attNote + ' Te notificaremos cuando haya novedades.');
@@ -9634,14 +9744,15 @@ const AdminModule = {
     }
   },
   /** Renderiza tabla admin */
-  renderTable() {
+  async renderTable() {
     TicketModule.sortField = this.sortField; TicketModule.sortDir = this.sortDir;
     const tickets = TicketModule.getFiltered('adminSearch','ticketFilterCat','adminFilterStatus','ticketFilterPriority');
+    await TicketEmailDebug.prefetchMailStatuses(tickets.map((t) => t.id));
     document.getElementById('adminBody').innerHTML = tickets.length ? tickets.map(t => `<tr>
       <td><strong>${t.id}</strong>${TicketAttachmentModule.countForTicket(t) ? ` <span title="${TicketAttachmentModule.countForTicket(t)} adjunto(s)" style="opacity:.75">${icon('document','sm')}</span>` : ''}</td><td>${t.nombre}</td><td>${t.categoria}</td>
-      <td>${badgePriority(t.prioridad)}</td><td>${badgeStatus(t.estado)}</td><td>${fmtDate(t.createdAt)}</td>
+      <td>${badgePriority(t.prioridad)}</td><td>${badgeStatus(t.estado)}</td><td>${TicketEmailDebug.mailBadgeHtml(t.id)}</td><td>${fmtDate(t.createdAt)}</td>
       <td>${actionBtn('edit', `TicketModule.openEdit('${t.id}')`, 'Editar')}</td>
-    </tr>`).join('') : '<tr><td colspan="7"><div class="empty-state">Sin tickets</div></td></tr>';
+    </tr>`).join('') : '<tr><td colspan="8"><div class="empty-state">Sin tickets</div></td></tr>';
   }
 };
 
