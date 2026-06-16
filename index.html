@@ -1144,11 +1144,16 @@ body.mode-client #adminApp{display:none!important}
             </div>
             <div class="form-group full"><label>Correo del administrador *</label><input type="email" id="setNotifyAdminEmail" placeholder="activawalkermartinez815@gmail.com" required></div>
             <div class="form-group full"><label>URL del panel admin</label><input type="url" id="setAdminPanelUrl" placeholder="https://chatbots-hipodromo.web.app/admin"></div>
-            <div class="form-group full"><label>SMTP (Gmail) — URI de conexión</label><input type="password" id="setSmtpConnectionUri" autocomplete="off" placeholder="smtps://tu@gmail.com:CONTRASEÑA_APP@smtp.gmail.com:465"></div>
-            <div class="form-group"><label>Correo remitente (FROM)</label><input type="email" id="setSmtpFromEmail" placeholder="tu@gmail.com"></div>
-            <div class="form-group"><label>Modo de envío</label><select id="setTicketEmailMode"><option value="auto">Automático (SMTP + extensión)</option><option value="smtp">Solo SMTP</option><option value="extension">Solo Trigger Email (colección mail)</option></select></div>
-            <p class="ticket-hint" style="margin:0 0 .75rem">Guarda aquí el correo del admin y la URI SMTP. La Cloud Function lee estos datos al crear cada ticket. Usa contraseña de aplicación de Google (no la clave normal).</p>
-            <div class="form-group full"><button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar Configuración</button></div>
+            <div class="form-group"><label>Gmail remitente (SMTP)</label><input type="email" id="setSmtpGmail" placeholder="tu@gmail.com" autocomplete="username"></div>
+            <div class="form-group"><label>Contraseña de aplicación Google</label><input type="password" id="setSmtpAppPassword" placeholder="16 caracteres sin espacios" autocomplete="new-password"></div>
+            <div class="form-group full"><label>O URI SMTP completa (opcional)</label><input type="password" id="setSmtpConnectionUri" autocomplete="off" placeholder="smtps://...@smtp.gmail.com:465"></div>
+            <div class="form-group"><label>Modo de envío</label><select id="setTicketEmailMode"><option value="auto">Automático (recomendado — Gmail SMTP)</option><option value="smtp">Solo SMTP</option><option value="extension">Solo Trigger Email (requiere extensión Firebase)</option></select></div>
+            <p id="smtpConfigStatus" class="ticket-hint" style="margin:0 0 .5rem"></p>
+            <p class="ticket-hint" style="margin:0 0 .75rem">Sin Gmail + contraseña de app guardados aquí, <strong>no llegará correo</strong> al admin. Google → Seguridad → Contraseñas de aplicaciones.</p>
+            <div class="form-group full" style="display:flex;gap:.5rem;flex-wrap:wrap">
+              <button type="button" class="btn btn-secondary btn-sm" id="btnVerifyTicketEmail">Verificar en consola</button>
+              <button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar Configuración</button>
+            </div>
           </form>
           <div class="firebase-config-card">
             <h3>Firebase Cloud</h3>
@@ -3157,6 +3162,9 @@ const ARTURITO_GADGET_KB_SEED = [
       if (!String(merged.adminPanelUrl || '').trim() && local?.adminPanelUrl) {
         merged.adminPanelUrl = local.adminPanelUrl;
       }
+      if (merged.ticketEmailMode === 'extension') {
+        merged.ticketEmailMode = 'auto';
+      }
       if (local?.adminKey) merged.adminKey = local.adminKey;
       if (remote.updatedAt) merged.updatedAt = remote.updatedAt;
       if (remote.updatedAt || remote.buildingName !== undefined) {
@@ -3325,13 +3333,17 @@ const ARTURITO_GADGET_KB_SEED = [
       if (!String(remote.smtpFromEmail || '').trim() && database.settings.smtpFromEmail) {
         patch.smtpFromEmail = database.settings.smtpFromEmail;
       }
-      if (!String(remote.ticketEmailMode || '').trim() && database.settings.ticketEmailMode) {
+      if (remote.ticketEmailMode === 'extension') {
+        patch.ticketEmailMode = 'auto';
+        database.settings.ticketEmailMode = 'auto';
+        console.warn('[TicketEmail] Modo "Solo Trigger Email" requiere la extensión firestore-send-email. Se cambió a "Automático". Configure Gmail SMTP en Configuración.');
+      } else if (!String(remote.ticketEmailMode || '').trim() && database.settings.ticketEmailMode) {
         patch.ticketEmailMode = database.settings.ticketEmailMode;
       }
       if (!Object.keys(patch).length) {
-        console.log('[TicketEmail] settings/main ya tiene correo/SMTP en Firestore', {
+        console.log('[TicketEmail] settings/main en Firestore', {
           notifyAdminEmail: remote.notifyAdminEmail || '(vacío)',
-          smtp: remote.smtpConnectionUri ? 'configurado' : 'NO configurado',
+          smtpConfigurado: !!String(remote.smtpConnectionUri || '').trim(),
           mode: remote.ticketEmailMode || 'auto'
         });
         return false;
@@ -5811,10 +5823,11 @@ const SettingsModule = {
     set('setWelcomeMsg', s.welcomeMessage, 'value');
     set('setNotifyAdminEmail', s.notifyAdminEmail || '', 'value');
     set('setAdminPanelUrl', s.adminPanelUrl || 'https://chatbots-hipodromo.web.app/admin', 'value');
-    set('setSmtpConnectionUri', s.smtpConnectionUri || '', 'value');
-    set('setSmtpFromEmail', s.smtpFromEmail || '', 'value');
+    const gmailEl = document.getElementById('setSmtpGmail');
+    if (gmailEl && !gmailEl.value) gmailEl.value = s.smtpFromEmail || s.smtpGmail || '';
     const modeEl = document.getElementById('setTicketEmailMode');
-    if (modeEl) modeEl.value = s.ticketEmailMode || 'auto';
+    if (modeEl) modeEl.value = (s.ticketEmailMode === 'extension' ? 'auto' : s.ticketEmailMode) || 'auto';
+    TicketEmailDebug.updateSmtpStatusIndicator();
     set('setPortalTagline', s.portalTagline || '', 'value');
     set('setPortalHint', s.portalHint || '', 'value');
     const theme = s.theme || 'light';
@@ -5864,11 +5877,26 @@ const SettingsModule = {
       return;
     }
     database.settings.adminPanelUrl = document.getElementById('setAdminPanelUrl').value.trim() || 'https://chatbots-hipodromo.web.app/admin';
-    database.settings.smtpConnectionUri = document.getElementById('setSmtpConnectionUri').value.trim();
-    database.settings.smtpFromEmail = document.getElementById('setSmtpFromEmail').value.trim();
-    database.settings.ticketEmailMode = document.getElementById('setTicketEmailMode')?.value || 'auto';
+    const smtpUri = TicketEmailDebug.resolveSmtpFromForm();
+    if (smtpUri) {
+      database.settings.smtpConnectionUri = smtpUri;
+      database.settings.smtpFromEmail = document.getElementById('setSmtpGmail')?.value.trim() || database.settings.smtpFromEmail || '';
+    } else if (!database.settings.smtpConnectionUri) {
+      toast('Guardado sin SMTP: los tickets no enviarán correo hasta configurar Gmail + contraseña de app', 'warning');
+    }
+    const modeEl = document.getElementById('setTicketEmailMode');
+    database.settings.ticketEmailMode = modeEl?.value || 'auto';
+    if (database.settings.ticketEmailMode === 'extension') {
+      toast('Modo Trigger Email requiere extensión en Firebase. Use Automático + Gmail SMTP.', 'warning');
+      database.settings.ticketEmailMode = 'auto';
+      if (modeEl) modeEl.value = 'auto';
+    }
     database.settings.updatedAt = Date.now();
     const result = await DatabaseModule.save('settings');
+    document.getElementById('setSmtpAppPassword').value = '';
+    document.getElementById('setSmtpConnectionUri').value = '';
+    TicketEmailDebug.updateSmtpStatusIndicator();
+    await TicketEmailDebug.audit('Tras guardar configuración');
     this.apply();
     this.replayPortalEntrance();
     if (document.getElementById('ccWelcome')) document.getElementById('ccWelcome').value = database.settings.welcomeMessage;
@@ -5893,6 +5921,9 @@ const SettingsModule = {
     });
     const tt = document.getElementById('themeToggle');
     if (tt) tt.addEventListener('click', () => this.toggleTheme());
+    document.getElementById('btnVerifyTicketEmail')?.addEventListener('click', () => {
+      void TicketEmailDebug.audit('Verificación manual');
+    });
   }
 };
 
@@ -7484,6 +7515,35 @@ const ChatModule = {
 
 /* ─── TicketEmailDebug — diagnóstico en consola del envío de correos ─── */
 const TicketEmailDebug = {
+  buildGmailSmtpUri(gmail, appPassword) {
+    const user = String(gmail || '').trim();
+    const pass = String(appPassword || '').replace(/\s/g, '');
+    if (!user || !pass) return '';
+    return `smtps://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@smtp.gmail.com:465`;
+  },
+  resolveSmtpFromForm() {
+    const gmail = document.getElementById('setSmtpGmail')?.value.trim();
+    const appPass = document.getElementById('setSmtpAppPassword')?.value.trim();
+    const uriManual = document.getElementById('setSmtpConnectionUri')?.value.trim();
+    if (gmail && appPass) return this.buildGmailSmtpUri(gmail, appPass);
+    if (uriManual) return uriManual;
+    return database.settings?.smtpConnectionUri || '';
+  },
+  updateSmtpStatusIndicator() {
+    const el = document.getElementById('smtpConfigStatus');
+    if (!el) return;
+    const uri = database.settings?.smtpConnectionUri || '';
+    const mode = database.settings?.ticketEmailMode || 'auto';
+    if (mode === 'extension') {
+      el.innerHTML = '<strong style="color:#dc2626">⚠ Modo Trigger Email</strong> — requiere extensión Firebase. Cambia a <em>Automático</em> y configura Gmail abajo.';
+      return;
+    }
+    if (uri) {
+      el.innerHTML = '<strong style="color:var(--primary)">✓ SMTP guardado en Firestore</strong> — los tickets nuevos deberían enviar correo al admin.';
+    } else {
+      el.innerHTML = '<strong style="color:#dc2626">⚠ SMTP no configurado</strong> — completa Gmail + contraseña de app abajo, modo <em>Automático</em>, y pulsa Guardar.';
+    }
+  },
   _maskUri(uri) {
     if (!uri) return '(vacío — configure en panel admin → Configuración)';
     return String(uri).replace(/:([^:@/]+)@/, ':***@');
@@ -7506,6 +7566,22 @@ const TicketEmailDebug = {
     const snap = await getDoc(ref);
     return { ok: true, exists: snap.exists(), data: snap.exists() ? snap.data() : {}, cid };
   },
+  async fixExtensionModeInCloud() {
+    const cloud = await this.readCloudSettings();
+    if (!cloud.ok || !cloud.exists) return false;
+    if ((cloud.data?.ticketEmailMode || 'auto') !== 'extension') return false;
+    const { setDoc } = ArturitoCloud.fb._modules;
+    const ref = ArturitoCloud.fb.doc(`condominios/${cloud.cid}/settings/main`);
+    const patch = { ticketEmailMode: 'auto', updatedAt: Date.now() };
+    await setDoc(ref, patch, { merge: true });
+    database.settings = database.settings || {};
+    database.settings.ticketEmailMode = 'auto';
+    const modeEl = document.getElementById('setTicketEmailMode');
+    if (modeEl) modeEl.value = 'auto';
+    this.updateSmtpStatusIndicator();
+    this.log('Modo corregido en Firestore', 'extension → auto (la extensión Trigger Email no está instalada)');
+    return true;
+  },
   async audit(label = 'Auditoría') {
     this.log(`── ${label} ──`);
     const local = database.settings || {};
@@ -7516,23 +7592,31 @@ const TicketEmailDebug = {
       ticketEmailMode: local.ticketEmailMode || 'auto'
     });
     try {
+      if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.sync?.ensureTicketEmailSettings) {
+        await ArturitoCloud.sync.ensureTicketEmailSettings(database);
+      }
       const cloud = await this.readCloudSettings();
       if (!cloud.ok) {
         this.warn('No se pudo leer Firestore', cloud.error);
         return cloud;
       }
-      const s = cloud.data || {};
+      let s = cloud.data || {};
+      if ((s.ticketEmailMode || 'auto') === 'extension') {
+        await this.fixExtensionModeInCloud();
+        const refreshed = await this.readCloudSettings();
+        if (refreshed.ok) s = refreshed.data || {};
+      }
       const issues = [];
       if (!String(s.notifyAdminEmail || '').trim()) {
-        issues.push('Falta notifyAdminEmail en Firestore → admin debe guardar Configuración');
+        issues.push('Falta notifyAdminEmail → panel admin → Configuración → correo del administrador → Guardar');
       }
       const mode = s.ticketEmailMode || 'auto';
       const hasSmtp = !!String(s.smtpConnectionUri || '').trim();
       if ((mode === 'auto' || mode === 'smtp') && !hasSmtp) {
-        issues.push('Falta smtpConnectionUri → pegar URI Gmail en Configuración o instalar extensión Trigger Email');
+        issues.push('Falta SMTP → Configuración → Gmail remitente + contraseña de app Google → modo Automático → Guardar');
       }
-      if (mode === 'extension') {
-        issues.push('Modo "Solo Trigger Email" → extensión firestore-send-email debe estar instalada');
+      if (mode === 'auto' && !hasSmtp) {
+        this.warn('Sin SMTP en Firestore', 'Los tickets se guardan pero el correo NO llegará hasta configurar Gmail en el panel admin.');
       }
       this.log('Config Firestore (settings/main)', {
         path: `condominios/${cloud.cid}/settings/main`,
@@ -7999,6 +8083,10 @@ const TicketModule = {
             this._pendingFiles = [];
             cloudSaved = true;
             await TicketEmailDebug.afterTicketCreated(newId, ticket);
+            const emailAudit = await TicketEmailDebug.readCloudSettings();
+            if (emailAudit.ok && !String(emailAudit.data?.smtpConnectionUri || '').trim()) {
+              toast('Ticket registrado. El admin NO recibirá correo hasta configurar Gmail SMTP en Configuración.', 'warning');
+            }
           } catch (err) {
             TicketEmailDebug.warn('Fallo al guardar ticket en Firestore', err);
             console.warn('[Cloud] ticket create:', err);
