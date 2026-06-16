@@ -1143,8 +1143,11 @@ body.mode-client #adminApp{display:none!important}
               <div style="font-weight:700;margin-bottom:.75rem;font-size:.95rem">Notificaciones por correo (tickets)</div>
             </div>
             <div class="form-group full"><label>Correo del administrador *</label><input type="email" id="setNotifyAdminEmail" placeholder="activawalkermartinez815@gmail.com" required></div>
-            <div class="form-group full"><label>URL del panel admin <span style="font-weight:400;color:var(--text-muted)">(enlace del botón del correo)</span></label><input type="url" id="setAdminPanelUrl" placeholder="https://chatbots-hipodromo.web.app/admin"></div>
-            <p class="ticket-hint" style="margin:0 0 .75rem">Al guardar, este correo queda en Firestore y la Cloud Function envía un aviso por cada ticket nuevo.</p>
+            <div class="form-group full"><label>URL del panel admin</label><input type="url" id="setAdminPanelUrl" placeholder="https://chatbots-hipodromo.web.app/admin"></div>
+            <div class="form-group full"><label>SMTP (Gmail) — URI de conexión</label><input type="password" id="setSmtpConnectionUri" autocomplete="off" placeholder="smtps://tu@gmail.com:CONTRASEÑA_APP@smtp.gmail.com:465"></div>
+            <div class="form-group"><label>Correo remitente (FROM)</label><input type="email" id="setSmtpFromEmail" placeholder="tu@gmail.com"></div>
+            <div class="form-group"><label>Modo de envío</label><select id="setTicketEmailMode"><option value="auto">Automático (SMTP + extensión)</option><option value="smtp">Solo SMTP</option><option value="extension">Solo Trigger Email (colección mail)</option></select></div>
+            <p class="ticket-hint" style="margin:0 0 .75rem">Guarda aquí el correo del admin y la URI SMTP. La Cloud Function lee estos datos al crear cada ticket. Usa contraseña de aplicación de Google (no la clave normal).</p>
             <div class="form-group full"><button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar Configuración</button></div>
           </form>
           <div class="firebase-config-card">
@@ -2900,7 +2903,7 @@ const ARTURITO_GADGET_KB_SEED = [
   const CLOUD_SETTINGS_KEYS = [
     'buildingName', 'logo', 'primaryColor', 'secondaryColor', 'botName',
     'welcomeMessage', 'portalTagline', 'portalHint', 'theme',
-    'notifyAdminEmail', 'adminPanelUrl',
+    'notifyAdminEmail', 'adminPanelUrl', 'smtpConnectionUri', 'smtpFromEmail', 'ticketEmailMode',
     'quickQuestions', 'topicsMenuIntro', 'showTopicsOnWelcome',
     'chatShortcuts', 'chatMessages', 'gadgetCategories', 'gadgetCategoryOrder', 'chatAnalytics', 'updatedAt'
   ];
@@ -3134,7 +3137,8 @@ const ARTURITO_GADGET_KB_SEED = [
       const merged = { ...(local || {}) };
       CLOUD_SETTINGS_KEYS.forEach((key) => {
         if (remote[key] !== undefined) {
-          if ((key === 'notifyAdminEmail' || key === 'adminPanelUrl') && !String(remote[key] || '').trim() && local?.[key]) {
+          if (['notifyAdminEmail', 'adminPanelUrl', 'smtpConnectionUri', 'smtpFromEmail', 'ticketEmailMode'].includes(key)
+            && !String(remote[key] || '').trim() && local?.[key]) {
             return;
           }
           merged[key] = remote[key];
@@ -3308,6 +3312,15 @@ const ARTURITO_GADGET_KB_SEED = [
       if (!String(remote.adminPanelUrl || '').trim() && database.settings.adminPanelUrl) {
         patch.adminPanelUrl = database.settings.adminPanelUrl;
       }
+      if (!String(remote.smtpConnectionUri || '').trim() && database.settings.smtpConnectionUri) {
+        patch.smtpConnectionUri = database.settings.smtpConnectionUri;
+      }
+      if (!String(remote.smtpFromEmail || '').trim() && database.settings.smtpFromEmail) {
+        patch.smtpFromEmail = database.settings.smtpFromEmail;
+      }
+      if (!String(remote.ticketEmailMode || '').trim() && database.settings.ticketEmailMode) {
+        patch.ticketEmailMode = database.settings.ticketEmailMode;
+      }
       if (!Object.keys(patch).length) return false;
       patch.updatedAt = Date.now();
       try {
@@ -3342,6 +3355,9 @@ const ARTURITO_GADGET_KB_SEED = [
         gadgetCategoryOrder: Array.isArray(s.gadgetCategoryOrder) ? s.gadgetCategoryOrder.slice() : [],
         notifyAdminEmail: s.notifyAdminEmail || 'activawalkermartinez815@gmail.com',
         adminPanelUrl: s.adminPanelUrl || 'https://chatbots-hipodromo.web.app/admin',
+        smtpConnectionUri: s.smtpConnectionUri || '',
+        smtpFromEmail: s.smtpFromEmail || '',
+        ticketEmailMode: s.ticketEmailMode || 'auto',
         chatAnalytics: s.chatAnalytics ? JSON.parse(JSON.stringify(s.chatAnalytics)) : {
           totalInteractions: 0, totalRatings: 0, ratingSum: 0, bySource: {}, ratingCounts: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
         },
@@ -4114,7 +4130,10 @@ const DatabaseModule = {
         adminKey: 'admin123',
         theme: 'light',
         notifyAdminEmail: 'activawalkermartinez815@gmail.com',
-        adminPanelUrl: 'https://chatbots-hipodromo.web.app/admin'
+        adminPanelUrl: 'https://chatbots-hipodromo.web.app/admin',
+        smtpConnectionUri: '',
+        smtpFromEmail: '',
+        ticketEmailMode: 'auto'
       }
     };
   },
@@ -4129,6 +4148,9 @@ const DatabaseModule = {
       adminKey:'admin123', theme:'light',
       notifyAdminEmail:'activawalkermartinez815@gmail.com',
       adminPanelUrl:'https://chatbots-hipodromo.web.app/admin',
+      smtpConnectionUri:'',
+      smtpFromEmail:'',
+      ticketEmailMode:'auto',
       quickQuestions: DEFAULT_QUICK_QUESTIONS.slice(),
       chatShortcuts: DEFAULT_CHAT_SHORTCUTS.map(s => ({ ...s })),
       chatMessages: { ...DEFAULT_CHAT_MESSAGES },
@@ -5775,6 +5797,10 @@ const SettingsModule = {
     set('setWelcomeMsg', s.welcomeMessage, 'value');
     set('setNotifyAdminEmail', s.notifyAdminEmail || '', 'value');
     set('setAdminPanelUrl', s.adminPanelUrl || 'https://chatbots-hipodromo.web.app/admin', 'value');
+    set('setSmtpConnectionUri', s.smtpConnectionUri || '', 'value');
+    set('setSmtpFromEmail', s.smtpFromEmail || '', 'value');
+    const modeEl = document.getElementById('setTicketEmailMode');
+    if (modeEl) modeEl.value = s.ticketEmailMode || 'auto';
     set('setPortalTagline', s.portalTagline || '', 'value');
     set('setPortalHint', s.portalHint || '', 'value');
     const theme = s.theme || 'light';
@@ -5824,6 +5850,9 @@ const SettingsModule = {
       return;
     }
     database.settings.adminPanelUrl = document.getElementById('setAdminPanelUrl').value.trim() || 'https://chatbots-hipodromo.web.app/admin';
+    database.settings.smtpConnectionUri = document.getElementById('setSmtpConnectionUri').value.trim();
+    database.settings.smtpFromEmail = document.getElementById('setSmtpFromEmail').value.trim();
+    database.settings.ticketEmailMode = document.getElementById('setTicketEmailMode')?.value || 'auto';
     database.settings.updatedAt = Date.now();
     const result = await DatabaseModule.save('settings');
     this.apply();
