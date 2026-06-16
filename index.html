@@ -1149,7 +1149,7 @@ body.mode-client #adminApp{display:none!important}
             <div class="form-group full"><label>O URI SMTP completa (opcional)</label><input type="password" id="setSmtpConnectionUri" autocomplete="off" placeholder="smtps://...@smtp.gmail.com:465"></div>
             <div class="form-group"><label>Modo de envío</label><select id="setTicketEmailMode"><option value="extension">Trigger Email (recomendado — extensión Firebase)</option><option value="auto">Automático (SMTP panel + Trigger Email)</option><option value="smtp">Solo SMTP del panel</option></select></div>
             <p id="smtpConfigStatus" class="ticket-hint" style="margin:0 0 .5rem"></p>
-            <p class="ticket-hint" style="margin:0 0 .75rem">Con <strong>Trigger Email</strong> no hace falta SMTP aquí: la extensión en Firebase envía desde <code>mail/</code>. Opcional: Gmail + contraseña de app para envío directo.</p>
+            <p class="ticket-hint" style="margin:0 0 .75rem">Al crear ticket se escribe en <code>mail/</code>. La Cloud Function <strong>processMailQueue</strong> envía el correo por Gmail SMTP. Configura Gmail abajo o en <code>functions/.env</code> al desplegar.</p>
             <div class="form-group full" style="display:flex;gap:.5rem;flex-wrap:wrap">
               <button type="button" class="btn btn-secondary btn-sm" id="btnVerifyTicketEmail">Verificar en consola</button>
               <button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar Configuración</button>
@@ -7807,11 +7807,11 @@ const TicketEmailDebug = {
         ticketEmailMode: mode
       });
       this.log('Cloud Function', {
-        nombre: 'notifyAdminOnTicket',
-        trigger: `condominios/${cloud.cid}/tickets/{ticketId}`,
+        processMailQueue: 'mail/{id} → envía SMTP directo (processMailQueue)',
+        notifyAdminOnTicket: 'tickets/{id} → respaldo',
         database: 'artutitohipodromo02',
-        logs: 'Firebase Console → Functions → notifyAdminOnTicket → Logs',
-        mailCola: 'Firestore artutitohipodromo02 → colección mail/'
+        logs: 'Firebase Console → Functions → processMailQueue → Logs',
+        smtp: 'functions/.env → SMTP_CONNECTION_URI o panel admin → Gmail + app password'
       });
       if (issues.length) {
         issues.forEach((i) => this.warn('Problema detectado', i));
