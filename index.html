@@ -2746,6 +2746,13 @@ const ARTURITO_GADGET_KB_SEED = [
       }
 
       await setDoc(doc(this.fb.col('tickets'), id), data);
+      const ticketPath = `condominios/${this.fb.getCondominioId()}/tickets/${id}`;
+      console.log('[TicketEmail] Ticket escrito en Firestore → dispara Cloud Function notifyAdminOnTicket', {
+        ticketId: id,
+        path: ticketPath,
+        categoria: data.categoria,
+        adjuntos: (data.adjuntos || []).length
+      });
       if (this.notifications && this.fb.auth?.currentUser) {
         try {
           await this.notifications.push({
@@ -3321,12 +3328,19 @@ const ARTURITO_GADGET_KB_SEED = [
       if (!String(remote.ticketEmailMode || '').trim() && database.settings.ticketEmailMode) {
         patch.ticketEmailMode = database.settings.ticketEmailMode;
       }
-      if (!Object.keys(patch).length) return false;
+      if (!Object.keys(patch).length) {
+        console.log('[TicketEmail] settings/main ya tiene correo/SMTP en Firestore', {
+          notifyAdminEmail: remote.notifyAdminEmail || '(vacío)',
+          smtp: remote.smtpConnectionUri ? 'configurado' : 'NO configurado',
+          mode: remote.ticketEmailMode || 'auto'
+        });
+        return false;
+      }
       patch.updatedAt = Date.now();
       try {
         await setDoc(ref, patch, { merge: true });
         Object.assign(database.settings, patch);
-        console.log('[CloudSync] Ticket email settings sincronizados en Firestore');
+        console.log('[CloudSync] Ticket email settings sincronizados en Firestore', patch);
         return true;
       } catch (err) {
         console.warn('[CloudSync] ensureTicketEmailSettings write:', err);
@@ -7468,6 +7482,96 @@ const ChatModule = {
   }
 };
 
+/* ─── TicketEmailDebug — diagnóstico en consola del envío de correos ─── */
+const TicketEmailDebug = {
+  _maskUri(uri) {
+    if (!uri) return '(vacío — configure en panel admin → Configuración)';
+    return String(uri).replace(/:([^:@/]+)@/, ':***@');
+  },
+  log(msg, data) {
+    if (data !== undefined) console.log('[TicketEmail]', msg, data);
+    else console.log('[TicketEmail]', msg);
+  },
+  warn(msg, data) {
+    if (data !== undefined) console.warn('[TicketEmail]', msg, data);
+    else console.warn('[TicketEmail]', msg);
+  },
+  async readCloudSettings() {
+    if (typeof ArturitoCloud === 'undefined' || !ArturitoCloud.fb?.isEnabled()) {
+      return { ok: false, error: 'Firebase no conectado' };
+    }
+    const { getDoc } = ArturitoCloud.fb._modules;
+    const cid = ArturitoCloud.fb.getCondominioId();
+    const ref = ArturitoCloud.fb.doc(`condominios/${cid}/settings/main`);
+    const snap = await getDoc(ref);
+    return { ok: true, exists: snap.exists(), data: snap.exists() ? snap.data() : {}, cid };
+  },
+  async audit(label = 'Auditoría') {
+    this.log(`── ${label} ──`);
+    const local = database.settings || {};
+    this.log('Config local (memoria)', {
+      notifyAdminEmail: local.notifyAdminEmail || '(vacío)',
+      smtpConnectionUri: this._maskUri(local.smtpConnectionUri),
+      smtpFromEmail: local.smtpFromEmail || '(vacío)',
+      ticketEmailMode: local.ticketEmailMode || 'auto'
+    });
+    try {
+      const cloud = await this.readCloudSettings();
+      if (!cloud.ok) {
+        this.warn('No se pudo leer Firestore', cloud.error);
+        return cloud;
+      }
+      const s = cloud.data || {};
+      const issues = [];
+      if (!String(s.notifyAdminEmail || '').trim()) {
+        issues.push('Falta notifyAdminEmail en Firestore → admin debe guardar Configuración');
+      }
+      const mode = s.ticketEmailMode || 'auto';
+      const hasSmtp = !!String(s.smtpConnectionUri || '').trim();
+      if ((mode === 'auto' || mode === 'smtp') && !hasSmtp) {
+        issues.push('Falta smtpConnectionUri → pegar URI Gmail en Configuración o instalar extensión Trigger Email');
+      }
+      if (mode === 'extension') {
+        issues.push('Modo "Solo Trigger Email" → extensión firestore-send-email debe estar instalada');
+      }
+      this.log('Config Firestore (settings/main)', {
+        path: `condominios/${cloud.cid}/settings/main`,
+        notifyAdminEmail: s.notifyAdminEmail || '(vacío)',
+        smtpConnectionUri: this._maskUri(s.smtpConnectionUri),
+        smtpFromEmail: s.smtpFromEmail || '(vacío)',
+        ticketEmailMode: mode
+      });
+      this.log('Cloud Function', {
+        nombre: 'notifyAdminOnTicket',
+        trigger: `condominios/${cloud.cid}/tickets/{ticketId}`,
+        logs: 'Firebase Console → Functions → notifyAdminOnTicket → Logs'
+      });
+      if (issues.length) {
+        issues.forEach((i) => this.warn('Problema detectado', i));
+      } else {
+        this.log('Checklist OK', 'Al crear ticket, la Function debería enviar correo. Si no llega, revisa logs de la Function y spam.');
+      }
+      return { ok: issues.length === 0, issues, settings: s };
+    } catch (err) {
+      this.warn('Error leyendo settings', err);
+      return { ok: false, error: err.message };
+    }
+  },
+  async afterTicketCreated(ticketId, ticket) {
+    this.log('✓ Ticket creado — esperando correo al admin', {
+      ticketId,
+      firestorePath: typeof ArturitoCloud !== 'undefined'
+        ? `condominios/${ArturitoCloud.fb.getCondominioId()}/tickets/${ticketId}`
+        : ticketId,
+      solicitante: ticket?.email,
+      categoria: ticket?.categoria
+    });
+    this.log('El correo NO lo envía el navegador; lo envía la Cloud Function en Firebase (1–10 s después).');
+    await this.audit('Post-creación ticket');
+  }
+};
+window.TicketEmailDebug = TicketEmailDebug;
+
 /* ─── TicketAttachmentModule — Adjuntos locales (IDB) + nube (Storage URL) ─── */
 const TicketAttachmentModule = {
   MAX_FILES: 5,
@@ -7877,8 +7981,16 @@ const TicketModule = {
         const ticket = { id: newId, ...data, attachments: [], createdAt: Date.now() };
         const pendingCount = this._pendingFiles.length;
         let cloudSaved = false;
+        TicketEmailDebug.log('Inicio creación ticket desde chat/formulario', {
+          ticketId: newId,
+          modo: App.mode,
+          adjuntosPendientes: pendingCount,
+          firebase: !!(typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled())
+        });
+        await TicketEmailDebug.audit('Antes de crear ticket');
         if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.sync?.ensureTicketEmailSettings) {
-          await ArturitoCloud.sync.ensureTicketEmailSettings(database);
+          const synced = await ArturitoCloud.sync.ensureTicketEmailSettings(database);
+          TicketEmailDebug.log('ensureTicketEmailSettings', synced ? 'campos faltantes escritos en Firestore' : 'sin cambios (revisar si SMTP está en panel admin)');
         }
         if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled()) {
           try {
@@ -7886,12 +7998,15 @@ const TicketModule = {
             ticket.attachments = saved?.attachments || [];
             this._pendingFiles = [];
             cloudSaved = true;
+            await TicketEmailDebug.afterTicketCreated(newId, ticket);
           } catch (err) {
+            TicketEmailDebug.warn('Fallo al guardar ticket en Firestore', err);
             console.warn('[Cloud] ticket create:', err);
             toast('No se pudo registrar la solicitud en la nube. Revisa tu conexión e intenta de nuevo.', 'error');
             return;
           }
         } else {
+          TicketEmailDebug.warn('Firebase desconectado — ticket solo en memoria, NO habrá correo al admin');
           cloudSaved = true;
         }
         if (!cloudSaved) return;
@@ -9443,6 +9558,7 @@ const App = {
       KnowledgeBaseModule.syncFromGadget();
       await RAGModule.rebuildIndex();
       this.showCloudSyncLoading(false);
+      void TicketEmailDebug.audit('Al cargar la app');
     } else {
       this.showCloudSyncLoading(false);
       toast('No se pudo conectar con Firestore. Todos los datos viven en la nube.', 'error');
