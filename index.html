@@ -3010,27 +3010,46 @@ const ARTURITO_GADGET_KB_SEED = [
       return httpsCallable(this.fb.functions, name);
     }
 
+    _callableError(err) {
+      if (err?.code === 'functions/internal' && /cors|fetch/i.test(String(err.message))) {
+        throw new Error('CORS: vuelve a desplegar functions con invoker public (bash deploy-firebase.sh)');
+      }
+      throw err;
+    }
+
     async sendReply(ticketId, mensaje, adminNombre) {
-      const fn = this._callable('sendEmailTicketReply');
-      const res = await fn({
-        condominioId: this.fb.getCondominioId(),
-        ticketId,
-        mensaje,
-        adminNombre
-      });
-      return res.data;
+      try {
+        const fn = this._callable('sendEmailTicketReply');
+        const res = await fn({
+          condominioId: this.fb.getCondominioId(),
+          ticketId,
+          mensaje,
+          adminNombre
+        });
+        return res.data;
+      } catch (err) {
+        this._callableError(err);
+      }
     }
 
     async testConfig() {
-      const fn = this._callable('testEmailConfig');
-      const res = await fn({ condominioId: this.fb.getCondominioId() });
-      return res.data;
+      try {
+        const fn = this._callable('testEmailConfig');
+        const res = await fn({ condominioId: this.fb.getCondominioId() });
+        return res.data;
+      } catch (err) {
+        this._callableError(err);
+      }
     }
 
     async pollNow() {
-      const fn = this._callable('pollEmailsNow');
-      const res = await fn({ condominioId: this.fb.getCondominioId() });
-      return res.data;
+      try {
+        const fn = this._callable('pollEmailsNow');
+        const res = await fn({ condominioId: this.fb.getCondominioId() });
+        return res.data;
+      } catch (err) {
+        this._callableError(err);
+      }
     }
 
     async updateTicketStatus(ticketId, estado) {
