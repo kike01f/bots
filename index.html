@@ -1139,6 +1139,11 @@ body.mode-client #adminApp{display:none!important}
             </div>
             <div class="form-group full"><label>Subtítulo / tagline</label><input type="text" id="setPortalTagline" placeholder="Tu asistente Arturito disponible 24/7"></div>
             <div class="form-group full"><label>Mensaje principal</label><textarea id="setPortalHint" rows="4" placeholder="Texto visible en la tarjeta central. Usa **negrita** y saltos de línea."></textarea></div>
+            <div class="form-group full" style="margin-top:.5rem;padding-top:1rem;border-top:1px dashed var(--border)">
+              <div style="font-weight:700;margin-bottom:.75rem;font-size:.95rem">Notificaciones por correo (tickets)</div>
+            </div>
+            <div class="form-group full"><label>Correo del administrador</label><input type="email" id="setNotifyAdminEmail" placeholder="admin@edificio.cl"></div>
+            <div class="form-group full"><label>URL del panel admin <span style="font-weight:400;color:var(--text-muted)">(enlace del botón del correo)</span></label><input type="url" id="setAdminPanelUrl" placeholder="https://chatbots-hipodromo.web.app/admin"></div>
             <div class="form-group full"><button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar Configuración</button></div>
           </form>
           <div class="firebase-config-card">
@@ -2559,14 +2564,21 @@ const ARTURITO_GADGET_KB_SEED = [
           },
           reject,
           async () => {
-            const url = await getDownloadURL(task.snapshot.ref);
-            resolve({
-              nombre: file.name,
-              url,
-              tipo: file.type,
-              tamaño: file.size,
-              fecha: Date.now()
-            });
+            const meta = {
+              id: storagePath.replace(/[/\\]/g, '_'),
+              name: file.name,
+              url: '',
+              mimeType: file.type || 'application/octet-stream',
+              size: file.size,
+              storagePath,
+              createdAt: Date.now()
+            };
+            try {
+              meta.url = await getDownloadURL(task.snapshot.ref);
+            } catch (err) {
+              console.warn('[Storage] getDownloadURL:', err);
+            }
+            resolve(meta);
           }
         );
       });
@@ -2588,6 +2600,19 @@ const ARTURITO_GADGET_KB_SEED = [
       this.notifications = notifications;
     }
 
+    normalizeAttachment(att) {
+      if (!att) return null;
+      return {
+        id: att.id || att.storagePath || ('att_' + Date.now()),
+        name: att.name || att.nombre || 'adjunto',
+        url: att.url || '',
+        mimeType: att.mimeType || att.tipo || 'application/octet-stream',
+        size: att.size ?? att.tamaño ?? 0,
+        storagePath: att.storagePath || '',
+        createdAt: att.createdAt || att.fecha || Date.now()
+      };
+    }
+
     mapFromLocal(t) {
       return {
         id: t.id,
@@ -2604,7 +2629,7 @@ const ARTURITO_GADGET_KB_SEED = [
         fechaActualizacion: t.updatedAt || Date.now(),
         creadoPor: t.creadoPor || t.email,
         asignadoA: t.asignadoA || null,
-        adjuntos: t.attachments || []
+        adjuntos: (t.attachments || []).map((a) => this.normalizeAttachment(a)).filter(Boolean)
       };
     }
 
@@ -2618,7 +2643,7 @@ const ARTURITO_GADGET_KB_SEED = [
         prioridad: d.prioridad || 'Media',
         descripcion: d.descripcion || '',
         estado: d.estado || 'Abierto',
-        attachments: d.adjuntos || [],
+        attachments: (d.adjuntos || []).map((a) => this.normalizeAttachment(a)).filter(Boolean),
         createdAt: d.fechaCreacion || Date.now(),
         updatedAt: d.fechaActualizacion || Date.now(),
         asignadoA: d.asignadoA,
@@ -2705,9 +2730,14 @@ const ARTURITO_GADGET_KB_SEED = [
       if (files.length) {
         data.adjuntos = [];
         for (const file of files) {
-          const path = this.storage.pathTicket(this.fb.getCondominioId(), id, `${Date.now()}_${file.name}`);
-          const meta = await this.storage.upload(file, path);
-          data.adjuntos.push(meta);
+          try {
+            const safeName = String(file.name || 'archivo').replace(/[/\\]/g, '_');
+            const path = this.storage.pathTicket(this.fb.getCondominioId(), id, `${Date.now()}_${safeName}`);
+            const meta = await this.storage.upload(file, path);
+            data.adjuntos.push(this.normalizeAttachment(meta));
+          } catch (err) {
+            console.warn('[Cloud] ticket file upload:', file?.name, err);
+          }
         }
       }
 
@@ -2730,8 +2760,29 @@ const ARTURITO_GADGET_KB_SEED = [
     async update(id, patch) {
       const { updateDoc, doc } = this.fb._modules;
       const data = { ...patch, fechaActualizacion: Date.now() };
+      if (data.adjuntos) {
+        data.adjuntos = data.adjuntos.map((a) => this.normalizeAttachment(a)).filter(Boolean);
+      }
       await updateDoc(doc(this.fb.col('tickets'), id), data);
       return data;
+    }
+
+    /** Sube archivos nuevos y actualiza adjuntos en Firestore */
+    async appendAttachments(ticketId, files = [], currentAttachments = []) {
+      if (!files.length) return (currentAttachments || []).map((a) => this.normalizeAttachment(a)).filter(Boolean);
+      const adjuntos = (currentAttachments || []).map((a) => this.normalizeAttachment(a)).filter(Boolean);
+      for (const file of files) {
+        try {
+          const safeName = String(file.name || 'archivo').replace(/[/\\]/g, '_');
+          const path = this.storage.pathTicket(this.fb.getCondominioId(), ticketId, `${Date.now()}_${safeName}`);
+          const meta = await this.storage.upload(file, path);
+          adjuntos.push(this.normalizeAttachment(meta));
+        } catch (err) {
+          console.warn('[Cloud] append attachment:', file?.name, err);
+        }
+      }
+      await this.update(ticketId, { adjuntos });
+      return adjuntos;
     }
 
     async delete(id) {
@@ -2848,6 +2899,7 @@ const ARTURITO_GADGET_KB_SEED = [
   const CLOUD_SETTINGS_KEYS = [
     'buildingName', 'logo', 'primaryColor', 'secondaryColor', 'botName',
     'welcomeMessage', 'portalTagline', 'portalHint', 'theme',
+    'notifyAdminEmail', 'adminPanelUrl',
     'quickQuestions', 'topicsMenuIntro', 'showTopicsOnWelcome',
     'chatShortcuts', 'chatMessages', 'gadgetCategories', 'gadgetCategoryOrder', 'chatAnalytics', 'updatedAt'
   ];
@@ -3239,6 +3291,8 @@ const ARTURITO_GADGET_KB_SEED = [
         chatMessages: s.chatMessages ? { ...s.chatMessages } : {},
         gadgetCategories: s.gadgetCategories ? JSON.parse(JSON.stringify(s.gadgetCategories)) : {},
         gadgetCategoryOrder: Array.isArray(s.gadgetCategoryOrder) ? s.gadgetCategoryOrder.slice() : [],
+        notifyAdminEmail: s.notifyAdminEmail || '',
+        adminPanelUrl: s.adminPanelUrl || '',
         chatAnalytics: s.chatAnalytics ? JSON.parse(JSON.stringify(s.chatAnalytics)) : {
           totalInteractions: 0, totalRatings: 0, ratingSum: 0, bySource: {}, ratingCounts: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
         },
@@ -4008,7 +4062,9 @@ const DatabaseModule = {
         portalTagline: 'Tu asistente Arturito disponible 24/7',
         portalHint: 'Consulta horarios, gastos comunes, reservas o crea solicitudes.\n\nHaz clic en **Arturito** en la esquina inferior derecha.',
         adminKey: 'admin123',
-        theme: 'light'
+        theme: 'light',
+        notifyAdminEmail: 'activawalkermartinez815@gmail.com',
+        adminPanelUrl: 'https://chatbots-hipodromo.web.app/admin'
       }
     };
   },
@@ -4021,6 +4077,8 @@ const DatabaseModule = {
       portalTagline:'Tu asistente Arturito disponible 24/7',
       portalHint:'Consulta horarios, gastos comunes, reservas o crea solicitudes.\n\nHaz clic en **Arturito** en la esquina inferior derecha.',
       adminKey:'admin123', theme:'light',
+      notifyAdminEmail:'activawalkermartinez815@gmail.com',
+      adminPanelUrl:'https://chatbots-hipodromo.web.app/admin',
       quickQuestions: DEFAULT_QUICK_QUESTIONS.slice(),
       chatShortcuts: DEFAULT_CHAT_SHORTCUTS.map(s => ({ ...s })),
       chatMessages: { ...DEFAULT_CHAT_MESSAGES },
@@ -5665,6 +5723,10 @@ const SettingsModule = {
     set('setPrimaryColor', s.primaryColor, 'value');
     set('setSecondaryColor', s.secondaryColor, 'value');
     set('setWelcomeMsg', s.welcomeMessage, 'value');
+    set('setNotifyAdminEmail', s.notifyAdminEmail || '', 'value');
+    set('setAdminPanelUrl', s.adminPanelUrl || 'https://chatbots-hipodromo.web.app/admin', 'value');
+    set('setPortalTagline', s.portalTagline || '', 'value');
+    set('setPortalHint', s.portalHint || '', 'value');
     const theme = s.theme || 'light';
     document.documentElement.setAttribute('data-theme', theme);
     const tt = document.getElementById('themeToggle');
@@ -5706,6 +5768,8 @@ const SettingsModule = {
     database.settings.welcomeMessage = document.getElementById('setWelcomeMsg').value.trim();
     database.settings.portalTagline = document.getElementById('setPortalTagline').value.trim();
     database.settings.portalHint = document.getElementById('setPortalHint').value.trim();
+    database.settings.notifyAdminEmail = document.getElementById('setNotifyAdminEmail').value.trim();
+    database.settings.adminPanelUrl = document.getElementById('setAdminPanelUrl').value.trim() || 'https://chatbots-hipodromo.web.app/admin';
     database.settings.updatedAt = Date.now();
     const result = await DatabaseModule.save('settings');
     this.apply();
@@ -7321,11 +7385,34 @@ const ChatModule = {
   }
 };
 
-/* ─── TicketAttachmentModule — Adjuntos de tickets en IndexedDB ─── */
+/* ─── TicketAttachmentModule — Adjuntos locales (IDB) + nube (Storage URL) ─── */
 const TicketAttachmentModule = {
   MAX_FILES: 5,
   MAX_SIZE: 5 * 1024 * 1024,
   ACCEPT: '.pdf,.doc,.docx,.jpg,.jpeg,.png,.gif,.webp,.txt,.xlsx,.xls',
+
+  normalize(att) {
+    if (!att) return null;
+    return {
+      id: att.id || att.storagePath || DatabaseModule.uid('att'),
+      name: att.name || att.nombre || 'adjunto',
+      url: att.url || '',
+      mimeType: att.mimeType || att.tipo || 'application/octet-stream',
+      size: att.size ?? att.tamaño ?? 0,
+      storagePath: att.storagePath || '',
+      createdAt: att.createdAt || att.fecha || Date.now(),
+      data: att.data
+    };
+  },
+
+  countForTicket(ticket) {
+    return (ticket?.attachments || []).length;
+  },
+
+  attachmentLabel(att) {
+    const n = this.normalize(att);
+    return n?.name || 'adjunto';
+  },
 
   validateFile(file) {
     if (!file) return 'Archivo no válido';
@@ -7372,14 +7459,42 @@ const TicketAttachmentModule = {
   },
 
   download(att) {
-    if (!att?.data) return;
-    const blob = new Blob([att.data], { type: att.mimeType || 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = att.name || 'adjunto';
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    const n = this.normalize(att);
+    if (!n) return;
+    if (n.url) {
+      window.open(n.url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (n.data) {
+      const blob = new Blob([n.data], { type: n.mimeType || 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = n.name || 'adjunto';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+  },
+
+  async downloadFromCloud(att) {
+    const n = this.normalize(att);
+    if (!n) return;
+    if (n.url) {
+      window.open(n.url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (!n.storagePath || typeof ArturitoCloud === 'undefined' || !ArturitoCloud.fb?.isEnabled()) {
+      toast('No se pudo abrir el adjunto', 'error');
+      return;
+    }
+    try {
+      const { ref, getDownloadURL } = ArturitoCloud.fb._modules;
+      const url = await getDownloadURL(ref(ArturitoCloud.fb.storage, n.storagePath));
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      console.warn('[Ticket] download cloud:', err);
+      toast('No se pudo descargar el adjunto', 'error');
+    }
   }
 };
 
@@ -7399,10 +7514,21 @@ const TicketModule = {
       e.target.value = '';
     });
     document.getElementById('ticketAttachList').addEventListener('click', async e => {
+      const dlUrl = e.target.closest('[data-dl-url]');
+      if (dlUrl) {
+        window.open(dlUrl.dataset.dlUrl, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      const dlPath = e.target.closest('[data-dl-path]');
+      if (dlPath) {
+        await TicketAttachmentModule.downloadFromCloud({ storagePath: dlPath.dataset.dlPath });
+        return;
+      }
       const dl = e.target.closest('[data-dl-att]');
       if (dl) {
         const att = await TicketAttachmentModule.getOne(dl.dataset.dlAtt);
         if (att) TicketAttachmentModule.download(att);
+        else await TicketAttachmentModule.downloadFromCloud({ id: dl.dataset.dlAtt });
         return;
       }
       const rm = e.target.closest('[data-rm-att]');
@@ -7454,7 +7580,7 @@ const TicketModule = {
       if (st && t.estado !== st) return false;
       if (pr && t.prioridad !== pr) return false;
       if (q && !Object.values(t).some(v => String(v).toLowerCase().includes(q)) &&
-        !(t.attachments || []).some(a => String(a.name || '').toLowerCase().includes(q))) return false;
+        !(t.attachments || []).some(a => String(TicketAttachmentModule.attachmentLabel(a)).toLowerCase().includes(q))) return false;
       return true;
     }).sort((a,b) => {
       const av = a[this.sortField], bv = b[this.sortField];
@@ -7466,12 +7592,15 @@ const TicketModule = {
   render() {
     const tickets = this.getFiltered('ticketSearch','ticketFilterCat','ticketFilterStatus','ticketFilterPriority');
     const tbody = document.getElementById('ticketsBody');
-    tbody.innerHTML = tickets.length ? tickets.map(t => `<tr>
-      <td><strong>${t.id}</strong>${(t.attachments?.length) ? ` <span title="${t.attachments.length} adjunto(s)" style="opacity:.75">${icon('document','sm')}</span>` : ''}</td><td>${t.nombre}</td><td>${t.departamento}</td>
+    tbody.innerHTML = tickets.length ? tickets.map(t => {
+      const attCount = TicketAttachmentModule.countForTicket(t);
+      return `<tr>
+      <td><strong>${t.id}</strong>${attCount ? ` <span title="${attCount} adjunto(s)" style="opacity:.75">${icon('document','sm')}</span>` : ''}</td><td>${t.nombre}</td><td>${t.departamento}</td>
       <td>${t.categoria}</td><td>${badgePriority(t.prioridad)}</td><td>${badgeStatus(t.estado)}</td>
       <td>${fmtDate(t.createdAt)}</td>
       <td>${actionBtn('edit', `TicketModule.openEdit('${t.id}')`, 'Editar')}${actionBtn('trash', `TicketModule.remove('${t.id}')`, 'Eliminar', true)}</td>
-    </tr>`).join('') : '<tr><td colspan="8"><div class="empty-state">No hay tickets</div></td></tr>';
+    </tr>`;
+    }).join('') : '<tr><td colspan="8"><div class="empty-state">No hay tickets</div></td></tr>';
   },
   resetAttachments() {
     this._pendingFiles = [];
@@ -7480,8 +7609,19 @@ const TicketModule = {
   },
   async loadAttachments(ticketId) {
     this._pendingFiles = [];
-    this._savedAttachments = ticketId ? await TicketAttachmentModule.listMeta(ticketId) : [];
+    const ticket = database.tickets.find(t => t.id === ticketId);
+    const cloud = (ticket?.attachments || []).map(a => TicketAttachmentModule.normalize(a)).filter(Boolean);
+    const local = ticketId ? (await TicketAttachmentModule.listMeta(ticketId)).map(a => TicketAttachmentModule.normalize(a)) : [];
+    this._savedAttachments = cloud.length ? cloud : local;
     this.renderAttachmentList();
+  },
+  _downloadBtnAttrs(att) {
+    const n = TicketAttachmentModule.normalize(att);
+    if (!n) return 'data-dl-att="" disabled';
+    if (n.url) return `data-dl-url="${escapeHtml(n.url)}"`;
+    if (n.storagePath) return `data-dl-path="${escapeHtml(n.storagePath)}"`;
+    if (n.data) return `data-dl-att="${escapeHtml(n.id)}"`;
+    return `data-dl-att="${escapeHtml(n.id)}"`;
   },
   renderAttachmentList() {
     const list = document.getElementById('ticketAttachList');
@@ -7489,11 +7629,12 @@ const TicketModule = {
     const total = this._savedAttachments.length + this._pendingFiles.length;
     let html = '';
     this._savedAttachments.forEach(att => {
+      const n = TicketAttachmentModule.normalize(att);
       html += `<li class="ticket-attach-item">
-        <span class="ticket-attach-name">${docIcon(fileExt(att.name))}<span class="ticket-attach-filename">${escapeHtml(att.name)}</span><small>${formatBytes(att.size)}</small></span>
+        <span class="ticket-attach-name">${docIcon(fileExt(n.name))}<span class="ticket-attach-filename">${escapeHtml(n.name)}</span><small>${formatBytes(n.size)}</small></span>
         <span class="ticket-attach-actions">
-          <button type="button" class="btn btn-secondary btn-sm" data-dl-att="${escapeHtml(att.id)}">Descargar</button>
-          <button type="button" class="btn btn-secondary btn-sm" data-rm-att="${escapeHtml(att.id)}" title="Quitar">×</button>
+          <button type="button" class="btn btn-secondary btn-sm" ${this._downloadBtnAttrs(n)}>Descargar</button>
+          ${n.data ? `<button type="button" class="btn btn-secondary btn-sm" data-rm-att="${escapeHtml(n.id)}" title="Quitar">×</button>` : ''}
         </span>
       </li>`;
     });
@@ -7614,11 +7755,34 @@ const TicketModule = {
       if (editId) {
         const idx = database.tickets.findIndex(t => t.id === editId);
         if (idx >= 0) {
-          await this.persistPendingFiles(editId);
-          const attachments = await TicketAttachmentModule.listMeta(editId);
+          let attachments = (database.tickets[idx].attachments || []).map(a => TicketAttachmentModule.normalize(a)).filter(Boolean);
+          if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.tickets?.appendAttachments && this._pendingFiles.length) {
+            try {
+              attachments = await ArturitoCloud.tickets.appendAttachments(editId, this._pendingFiles.slice(), attachments);
+              this._pendingFiles = [];
+            } catch (err) {
+              console.warn('[Cloud] ticket append attachments:', err);
+              toast('No se pudieron subir todos los adjuntos a la nube', 'warning');
+            }
+          } else {
+            await this.persistPendingFiles(editId);
+            const idb = await TicketAttachmentModule.listMeta(editId);
+            if (idb.length) attachments = idb.map(a => TicketAttachmentModule.normalize(a));
+          }
           database.tickets[idx] = { ...database.tickets[idx], ...data, attachments };
           if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled()) {
-            try { await ArturitoCloud.tickets.update(editId, data); } catch (err) { console.warn('[Cloud] ticket update:', err); }
+            try {
+              await ArturitoCloud.tickets.update(editId, {
+                nombre: data.nombre,
+                departamento: data.departamento,
+                email: data.email,
+                categoria: data.categoria,
+                prioridad: data.prioridad,
+                estado: data.estado,
+                descripcion: data.descripcion,
+                adjuntos: attachments
+              });
+            } catch (err) { console.warn('[Cloud] ticket update:', err); }
           }
         }
         toast('Ticket actualizado', 'success');
@@ -7628,11 +7792,12 @@ const TicketModule = {
           newId = await ArturitoCloud.tickets.allocateTicketId();
         }
         const ticket = { id: newId, ...data, attachments: [], createdAt: Date.now() };
+        const pendingCount = this._pendingFiles.length;
         let cloudSaved = false;
         if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled()) {
           try {
             const saved = await ArturitoCloud.tickets.create(ticket, this._pendingFiles.slice());
-            if (saved?.attachments?.length) ticket.attachments = saved.attachments;
+            ticket.attachments = saved?.attachments || [];
             this._pendingFiles = [];
             cloudSaved = true;
           } catch (err) {
@@ -7648,6 +7813,9 @@ const TicketModule = {
         if (!ticket.attachments.length) {
           const newMetas = await this.persistPendingFiles(newId);
           ticket.attachments = newMetas.length ? await TicketAttachmentModule.listMeta(newId) : [];
+        }
+        if (pendingCount && !ticket.attachments.length) {
+          toast('La solicitud se registró, pero los adjuntos no se subieron. Publica storage.rules en Firebase e intenta de nuevo.', 'warning');
         }
         toast('Ticket creado: ' + newId, 'success');
         if (App.mode === 'client' && ChatModule.getCurrent()) {
@@ -7686,7 +7854,7 @@ const TicketModule = {
   /** Exporta tickets a CSV (Excel) */
   exportExcel() {
     const headers = ['ID','Nombre','Departamento','Email','Categoría','Prioridad','Estado','Descripción','Adjuntos','Fecha'];
-    const rows = database.tickets.map(t => [t.id,t.nombre,t.departamento,t.email,t.categoria,t.prioridad,t.estado,t.descripcion,(t.attachments||[]).map(a=>a.name).join('; ')||'—',fmtDate(t.createdAt)]);
+    const rows = database.tickets.map(t => [t.id,t.nombre,t.departamento,t.email,t.categoria,t.prioridad,t.estado,t.descripcion,(t.attachments||[]).map(a=>TicketAttachmentModule.attachmentLabel(a)).join('; ')||'—',fmtDate(t.createdAt)]);
     const csv = [headers,...rows].map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
     const blob = new Blob(['\ufeff'+csv], { type:'text/csv;charset=utf-8' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'tickets_arturito.csv'; a.click();
@@ -8794,7 +8962,7 @@ const AdminModule = {
     TicketModule.sortField = this.sortField; TicketModule.sortDir = this.sortDir;
     const tickets = TicketModule.getFiltered('adminSearch','ticketFilterCat','adminFilterStatus','ticketFilterPriority');
     document.getElementById('adminBody').innerHTML = tickets.length ? tickets.map(t => `<tr>
-      <td><strong>${t.id}</strong>${(t.attachments?.length) ? ` <span title="${t.attachments.length} adjunto(s)" style="opacity:.75">${icon('document','sm')}</span>` : ''}</td><td>${t.nombre}</td><td>${t.categoria}</td>
+      <td><strong>${t.id}</strong>${TicketAttachmentModule.countForTicket(t) ? ` <span title="${TicketAttachmentModule.countForTicket(t)} adjunto(s)" style="opacity:.75">${icon('document','sm')}</span>` : ''}</td><td>${t.nombre}</td><td>${t.categoria}</td>
       <td>${badgePriority(t.prioridad)}</td><td>${badgeStatus(t.estado)}</td><td>${fmtDate(t.createdAt)}</td>
       <td>${actionBtn('edit', `TicketModule.openEdit('${t.id}')`, 'Editar')}</td>
     </tr>`).join('') : '<tr><td colspan="7"><div class="empty-state">Sin tickets</div></td></tr>';
