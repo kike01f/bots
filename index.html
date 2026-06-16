@@ -1142,8 +1142,9 @@ body.mode-client #adminApp{display:none!important}
             <div class="form-group full" style="margin-top:.5rem;padding-top:1rem;border-top:1px dashed var(--border)">
               <div style="font-weight:700;margin-bottom:.75rem;font-size:.95rem">Notificaciones por correo (tickets)</div>
             </div>
-            <div class="form-group full"><label>Correo del administrador</label><input type="email" id="setNotifyAdminEmail" placeholder="admin@edificio.cl"></div>
+            <div class="form-group full"><label>Correo del administrador *</label><input type="email" id="setNotifyAdminEmail" placeholder="activawalkermartinez815@gmail.com" required></div>
             <div class="form-group full"><label>URL del panel admin <span style="font-weight:400;color:var(--text-muted)">(enlace del botón del correo)</span></label><input type="url" id="setAdminPanelUrl" placeholder="https://chatbots-hipodromo.web.app/admin"></div>
+            <p class="ticket-hint" style="margin:0 0 .75rem">Al guardar, este correo queda en Firestore y la Cloud Function envía un aviso por cada ticket nuevo.</p>
             <div class="form-group full"><button type="submit" class="btn btn-primary"><span data-icon="save" data-icon-size="sm"></span> Guardar Configuración</button></div>
           </form>
           <div class="firebase-config-card">
@@ -3132,8 +3133,19 @@ const ARTURITO_GADGET_KB_SEED = [
       if (!remote || typeof remote !== 'object') return local || {};
       const merged = { ...(local || {}) };
       CLOUD_SETTINGS_KEYS.forEach((key) => {
-        if (remote[key] !== undefined) merged[key] = remote[key];
+        if (remote[key] !== undefined) {
+          if ((key === 'notifyAdminEmail' || key === 'adminPanelUrl') && !String(remote[key] || '').trim() && local?.[key]) {
+            return;
+          }
+          merged[key] = remote[key];
+        }
       });
+      if (!String(merged.notifyAdminEmail || '').trim() && local?.notifyAdminEmail) {
+        merged.notifyAdminEmail = local.notifyAdminEmail;
+      }
+      if (!String(merged.adminPanelUrl || '').trim() && local?.adminPanelUrl) {
+        merged.adminPanelUrl = local.adminPanelUrl;
+      }
       if (local?.adminKey) merged.adminKey = local.adminKey;
       if (remote.updatedAt) merged.updatedAt = remote.updatedAt;
       if (remote.updatedAt || remote.buildingName !== undefined) {
@@ -3272,6 +3284,43 @@ const ARTURITO_GADGET_KB_SEED = [
       return payload;
     }
 
+    /** Garantiza notifyAdminEmail en Firestore (la Function lo necesita al crear tickets) */
+    async ensureTicketEmailSettings(database) {
+      if (!this.fb.isEnabled()) return false;
+      const { getDoc, setDoc } = this.fb._modules;
+      const ref = this.fb.doc(`condominios/${this._cid()}/settings/main`);
+      database.settings = database.settings || {};
+      if (global.DatabaseModule?.ensureDefaults) {
+        global.DatabaseModule.ensureDefaults({ skipGadgetSeed: true });
+      }
+      let remote = {};
+      try {
+        const snap = await getDoc(ref);
+        if (snap.exists()) remote = snap.data() || {};
+      } catch (err) {
+        console.warn('[CloudSync] ensureTicketEmailSettings read:', err);
+        return false;
+      }
+      const patch = {};
+      const remoteEmail = String(remote.notifyAdminEmail || '').trim();
+      const localEmail = String(database.settings.notifyAdminEmail || '').trim();
+      if (!remoteEmail && localEmail) patch.notifyAdminEmail = localEmail;
+      if (!String(remote.adminPanelUrl || '').trim() && database.settings.adminPanelUrl) {
+        patch.adminPanelUrl = database.settings.adminPanelUrl;
+      }
+      if (!Object.keys(patch).length) return false;
+      patch.updatedAt = Date.now();
+      try {
+        await setDoc(ref, patch, { merge: true });
+        Object.assign(database.settings, patch);
+        console.log('[CloudSync] Ticket email settings sincronizados en Firestore');
+        return true;
+      } catch (err) {
+        console.warn('[CloudSync] ensureTicketEmailSettings write:', err);
+        return false;
+      }
+    }
+
     sanitizeSettingsForCloud(settings) {
       const s = settings || {};
       const payload = {
@@ -3291,8 +3340,8 @@ const ARTURITO_GADGET_KB_SEED = [
         chatMessages: s.chatMessages ? { ...s.chatMessages } : {},
         gadgetCategories: s.gadgetCategories ? JSON.parse(JSON.stringify(s.gadgetCategories)) : {},
         gadgetCategoryOrder: Array.isArray(s.gadgetCategoryOrder) ? s.gadgetCategoryOrder.slice() : [],
-        notifyAdminEmail: s.notifyAdminEmail || '',
-        adminPanelUrl: s.adminPanelUrl || '',
+        notifyAdminEmail: s.notifyAdminEmail || 'activawalkermartinez815@gmail.com',
+        adminPanelUrl: s.adminPanelUrl || 'https://chatbots-hipodromo.web.app/admin',
         chatAnalytics: s.chatAnalytics ? JSON.parse(JSON.stringify(s.chatAnalytics)) : {
           totalInteractions: 0, totalRatings: 0, ratingSum: 0, bySource: {}, ratingCounts: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
         },
@@ -3668,6 +3717,7 @@ const ARTURITO_GADGET_KB_SEED = [
 
       let migrated = false;
       await this.sync.pullPublicCloudData(database, true);
+      await this.sync.ensureTicketEmailSettings(database);
 
       const cloudEmpty = !this.sync._cloudSettingsActive && !this.sync._cloudKBActive;
 
@@ -5769,6 +5819,10 @@ const SettingsModule = {
     database.settings.portalTagline = document.getElementById('setPortalTagline').value.trim();
     database.settings.portalHint = document.getElementById('setPortalHint').value.trim();
     database.settings.notifyAdminEmail = document.getElementById('setNotifyAdminEmail').value.trim();
+    if (!database.settings.notifyAdminEmail) {
+      toast('Indica el correo del administrador para recibir tickets', 'warning');
+      return;
+    }
     database.settings.adminPanelUrl = document.getElementById('setAdminPanelUrl').value.trim() || 'https://chatbots-hipodromo.web.app/admin';
     database.settings.updatedAt = Date.now();
     const result = await DatabaseModule.save('settings');
@@ -7794,6 +7848,9 @@ const TicketModule = {
         const ticket = { id: newId, ...data, attachments: [], createdAt: Date.now() };
         const pendingCount = this._pendingFiles.length;
         let cloudSaved = false;
+        if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.sync?.ensureTicketEmailSettings) {
+          await ArturitoCloud.sync.ensureTicketEmailSettings(database);
+        }
         if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled()) {
           try {
             const saved = await ArturitoCloud.tickets.create(ticket, this._pendingFiles.slice());
