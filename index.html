@@ -869,7 +869,7 @@ body.mode-client #adminApp{display:none!important}
   <div class="admin-login-card">
     <h2>Acceso Administración</h2>
     <p>Panel interno — no visible para residentes</p>
-    <div class="form-group"><label>Correo</label><input type="email" id="loginEmail" placeholder="admin@edificio.cl" autocomplete="username"></div>
+    <div class="form-group"><label>Correo</label><input type="email" id="loginEmail" placeholder="angelfrias1993@gmail.com" autocomplete="username"></div>
     <div class="form-group"><label>Clave de acceso</label><input type="password" id="loginPass" placeholder="••••••••" autocomplete="current-password"></div>
     <div style="display:flex;gap:.5rem;margin-top:1rem">
       <button type="button" class="btn btn-secondary" id="loginCancel" style="flex:1">Volver</button>
@@ -1226,7 +1226,7 @@ body.mode-client #adminApp{display:none!important}
             <p>Crea el administrador en Firebase Authentication para acceder al panel, tickets por correo y Cloud Functions. Solo necesitas hacerlo una vez por proyecto.</p>
             <form id="cloudAdminForm" class="form-grid">
               <div class="form-group"><label>Nombre</label><input type="text" id="setupAdminNombre" value="Administrador"></div>
-              <div class="form-group"><label>Correo admin</label><input type="email" id="setupAdminEmail" value="admin@edificio.cl" autocomplete="username"></div>
+              <div class="form-group"><label>Correo admin</label><input type="email" id="setupAdminEmail" value="angelfrias1993@gmail.com" autocomplete="username"></div>
               <div class="form-group"><label>Contraseña</label><input type="password" id="setupAdminPass" value="admin123" autocomplete="new-password"></div>
               <div class="form-group"><label>Rol</label><select id="setupAdminRol"><option value="Administrador">Administrador</option><option value="SuperAdmin">SuperAdmin</option><option value="Supervisor">Supervisor</option></select></div>
               <div class="form-group full" style="display:flex;gap:.5rem;flex-wrap:wrap">
@@ -4404,7 +4404,7 @@ const DatabaseModule = {
   seed() {
     database = {
       users: [
-        { id: 'u_admin', nombre: 'Administrador', email: 'admin@edificio.cl', rol: 'Administrador', departamento: 'Administración', createdAt: Date.now() }
+        { id: 'u_admin', nombre: 'Administrador', email: 'angelfrias1993@gmail.com', rol: 'Administrador', departamento: 'Administración', createdAt: Date.now() }
       ],
       tickets: [],
       knowledge: [],
@@ -4437,7 +4437,7 @@ const DatabaseModule = {
     }
     if (!database.users.some(u => u.rol === 'Administrador')) {
       database.users.push({
-        id: 'u_admin', nombre: 'Administrador', email: 'admin@edificio.cl',
+        id: 'u_admin', nombre: 'Administrador', email: 'angelfrias1993@gmail.com',
         rol: 'Administrador', departamento: 'Administración', createdAt: Date.now()
       });
     }
