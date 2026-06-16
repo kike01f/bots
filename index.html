@@ -522,6 +522,10 @@ body.mode-client #adminApp{display:none!important}
   .chat-msg-bubble-wrap{max-width:96%}
   .chat-msg-row.otro::before{display:none}
   .chat-header-btn,.chat-header-close{width:1.85rem;height:1.85rem}
+  .modal-content{max-height:min(92vh, calc(100dvh - 2rem));overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .modal.show{align-items:flex-end;padding:0}
+  .modal.show .modal-content{border-radius:var(--radius) var(--radius) 0 0;width:100%;max-width:100%}
+  .admin-login-card{width:calc(100% - 1.5rem);max-width:420px}
 }
 @media(prefers-reduced-motion:reduce){
   .chat-flotante-wrap,.chat-backdrop,.chat-fab-arturito{transition:none!important;animation:none!important;filter:none!important}
@@ -1185,7 +1189,7 @@ body.mode-client #adminApp{display:none!important}
             <h3>Firebase Cloud</h3>
             <p>Proyecto <strong>chatbots-hipodromo</strong>. Todo el conocimiento, tickets y configuración se respaldan en Firestore. Editable en tiempo real desde el panel.</p>
             <form id="firebaseConfigForm" class="form-grid">
-              <div class="form-group"><label>API Key</label><input type="text" id="fbApiKey" autocomplete="off" value="AIzaSyBocB2dUQCo2CB3rpFDWvsoUZzS1v-g5Qg"></div>
+              <div class="form-group"><label>API Key</label><input type="password" id="fbApiKey" autocomplete="off" placeholder="Se carga desde configuración guardada"></div>
               <div class="form-group"><label>Auth Domain</label><input type="text" id="fbAuthDomain" value="chatbots-hipodromo.firebaseapp.com"></div>
               <div class="form-group"><label>Project ID</label><input type="text" id="fbProjectId" value="chatbots-hipodromo"></div>
               <div class="form-group"><label>Storage Bucket</label><input type="text" id="fbStorageBucket" value="chatbots-hipodromo.firebasestorage.app"></div>
@@ -1242,8 +1246,8 @@ body.mode-client #adminApp{display:none!important}
             <p>Crea el administrador en Firebase Authentication para acceder al panel, tickets por correo y Cloud Functions. Solo necesitas hacerlo una vez por proyecto.</p>
             <form id="cloudAdminForm" class="form-grid">
               <div class="form-group"><label>Nombre</label><input type="text" id="setupAdminNombre" value="Administrador"></div>
-              <div class="form-group"><label>Correo admin</label><input type="email" id="setupAdminEmail" value="angelfrias1993@gmail.com" autocomplete="username"></div>
-              <div class="form-group"><label>Contraseña</label><input type="password" id="setupAdminPass" value="admin123" autocomplete="new-password"></div>
+              <div class="form-group"><label>Correo admin</label><input type="email" id="setupAdminEmail" placeholder="admin@condominio.cl" autocomplete="username"></div>
+              <div class="form-group"><label>Contraseña</label><input type="password" id="setupAdminPass" placeholder="Mínimo 6 caracteres" autocomplete="new-password"></div>
               <div class="form-group"><label>Rol</label><select id="setupAdminRol"><option value="Administrador">Administrador</option><option value="SuperAdmin">SuperAdmin</option><option value="Supervisor">Supervisor</option></select></div>
               <div class="form-group full" style="display:flex;gap:.5rem;flex-wrap:wrap">
                 <button type="submit" class="btn btn-primary btn-sm"><span data-icon="users" data-icon-size="sm"></span> Crear admin en Firebase Auth</button>
@@ -2515,9 +2519,13 @@ const ARTURITO_GADGET_KB_SEED = [
         return false;
       }
       try {
-        this._modules = await loadFirebaseModules();
-        const { initializeApp, getAuth, getFirestore, getStorage, getFunctions } = this._modules;
-        this.app = initializeApp(config);
+        if (!this._modules) this._modules = await loadFirebaseModules();
+        const { initializeApp, getApps, getApp, getAuth, getFirestore, getStorage, getFunctions } = this._modules;
+        if (getApps().length > 0) {
+          this.app = getApp();
+        } else {
+          this.app = initializeApp(config);
+        }
         this.auth = getAuth(this.app);
         this.db = getFirestore(this.app);
         this.storage = getStorage(this.app);
@@ -2527,6 +2535,16 @@ const ARTURITO_GADGET_KB_SEED = [
         this.saveConfig({ ...config, condominioId: this.condominioId });
         return true;
       } catch (err) {
+        if (err?.code === 'app/duplicate-app' && this._modules?.getApp) {
+          this.app = this._modules.getApp();
+          this.auth = this._modules.getAuth(this.app);
+          this.db = this._modules.getFirestore(this.app);
+          this.storage = this._modules.getStorage(this.app);
+          this.functions = this._modules.getFunctions(this.app, 'us-central1');
+          this.enabled = true;
+          this.condominioId = config.condominioId || config.projectId || 'default';
+          return true;
+        }
         console.error('[FirebaseManager] init error:', err);
         this.enabled = false;
         throw err;
@@ -4197,6 +4215,7 @@ const ARTURITO_GADGET_KB_SEED = [
 
   /* ─── UIManager (Firebase) ─── */
   class UIManager {
+    static _firebaseFormBound = false;
     static setCloudBadge(connected, text) {
       const el = document.getElementById('cloudStatusBadge');
       if (!el) return;
@@ -4206,7 +4225,8 @@ const ARTURITO_GADGET_KB_SEED = [
 
     static bindFirebaseConfigForm(fb, onSaved) {
       const form = document.getElementById('firebaseConfigForm');
-      if (!form) return;
+      if (!form || UIManager._firebaseFormBound) return;
+      UIManager._firebaseFormBound = true;
       const cfg = fb.loadConfig() || fb.getDefaultConfig();
       const fieldMap = {
         fbApiKey: 'apiKey',
@@ -4688,7 +4708,7 @@ const DatabaseModule = {
   seed() {
     database = {
       users: [
-        { id: 'u_admin', nombre: 'Administrador', email: 'angelfrias1993@gmail.com', rol: 'Administrador', departamento: 'Administración', createdAt: Date.now() }
+        { id: 'u_admin', nombre: 'Administrador', email: '', rol: 'Administrador', departamento: 'Administración', createdAt: Date.now() }
       ],
       tickets: [],
       knowledge: [],
@@ -4705,7 +4725,7 @@ const DatabaseModule = {
         welcomeMessage: '¡Hola! Soy Arturito, tu asistente del edificio. Pregúntame sobre horarios, gastos comunes, reservas o crea solicitudes. ¿En qué te ayudo?',
         portalTagline: 'Tu asistente Arturito disponible 24/7',
         portalHint: 'Consulta horarios, gastos comunes, reservas o crea solicitudes.\n\nHaz clic en **Arturito** en la esquina inferior derecha.',
-        adminKey: 'admin123',
+        adminKey: generateSecureKey(),
         theme: 'light'
       }
     };
@@ -4721,7 +4741,7 @@ const DatabaseModule = {
     }
     if (!database.users.some(u => u.rol === 'Administrador')) {
       database.users.push({
-        id: 'u_admin', nombre: 'Administrador', email: 'angelfrias1993@gmail.com',
+        id: 'u_admin', nombre: 'Administrador', email: '',
         rol: 'Administrador', departamento: 'Administración', createdAt: Date.now()
       });
     }
@@ -4748,7 +4768,7 @@ const DatabaseModule = {
       botName:'Arturito', welcomeMessage:'¡Hola! Soy Arturito, tu asistente virtual.',
       portalTagline:'Tu asistente Arturito disponible 24/7',
       portalHint:'Consulta horarios, gastos comunes, reservas o crea solicitudes.\n\nHaz clic en **Arturito** en la esquina inferior derecha.',
-      adminKey:'admin123', theme:'light',
+      adminKey: generateSecureKey(), theme:'light',
       quickQuestions: DEFAULT_QUICK_QUESTIONS.slice(),
       chatShortcuts: DEFAULT_CHAT_SHORTCUTS.map(s => ({ ...s })),
       chatMessages: { ...DEFAULT_CHAT_MESSAGES },
@@ -4889,6 +4909,26 @@ function badgePriority(p) {
   return `<span class="badge badge-${m[p]||'medium'}">${p}</span>`;
 }
 function escapeHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function validateEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(String(email || '').trim()); }
+function validateRequired(val, minLen = 1) { return String(val || '').trim().length >= minLen; }
+function sanitizeText(s, maxLen = 8000) { return String(s || '').trim().slice(0, maxLen); }
+function generateSecureKey() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+  return 'k' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+function appendTicketAudit(ticket, action, actor, detail) {
+  if (!ticket) return;
+  if (!Array.isArray(ticket.historial)) ticket.historial = [];
+  ticket.historial.push({
+    autor: actor?.rol === 'Administrador' || actor?.rol === 'SuperAdmin' ? 'administrador' : 'sistema',
+    nombre: actor?.nombre || actor?.email || 'Sistema',
+    email: actor?.email || '',
+    mensaje: detail || action,
+    action,
+    fecha: Date.now(),
+    adjuntos: []
+  });
+}
 function formatBytes(n) {
   if (!n) return '0 B';
   const u = ['B','KB','MB','GB']; let i = 0;
@@ -6542,10 +6582,11 @@ const AuthModule = {
 
     if (this.useFirebase()) {
       try {
+        if (!validateEmail(email)) { toast('Ingresa un correo válido', 'warning'); return false; }
+        if (!validateRequired(pass, 6)) { toast('Contraseña requerida (mín. 6 caracteres)', 'warning'); return false; }
         const user = await ArturitoCloud.auth.login(email, pass);
         this.currentUser = user;
         await ArturitoCloud.sync.flushPendingSettings(database);
-        await DatabaseModule.save('full', { fullSync: true });
         this.hideLogin();
         App.setMode('admin');
         toast('Bienvenido, ' + user.nombre, 'success');
@@ -6556,8 +6597,14 @@ const AuthModule = {
       }
     }
 
+    if (ArturitoCloud?.fb?.isEnabled?.()) {
+      toast('El acceso administrativo requiere Firebase Auth. Configura un administrador en Configuración.', 'warning');
+      return false;
+    }
+
     const user = database.users.find(u => u.email === email && ['Administrador','Conserje','Comité','SuperAdmin','Supervisor','Operador'].includes(u.rol));
-    const key = database.settings.adminKey || 'admin123';
+    const key = database.settings.adminKey;
+    if (!key) { toast('Configura acceso administrativo en ajustes', 'error'); return false; }
     if (user && pass === key) {
       this.currentUser = user;
       sessionStorage.setItem(SESSION_KEY, JSON.stringify({ email, ts: Date.now() }));
@@ -7723,6 +7770,7 @@ window.ChatAnalyticsModule = ChatAnalyticsModule;
 
 /* ─── ChatModule ─── */
 const ChatModule = {
+  _sending: false,
   /** Inicializa el módulo de chat (gadget residente) */
   init() {
     this.renderQuickQuestions();
@@ -8016,12 +8064,21 @@ const ChatModule = {
   },
   /** Envía mensaje del usuario y procesa respuesta IA */
   sendMessage() {
+    if (this._sending) return;
     const inp = document.getElementById('chatInput');
-    const text = inp.value.trim(); if (!text) return;
+    const text = sanitizeText(inp.value, 2000);
+    if (!text) return;
+    this._sending = true;
     inp.value = '';
     this.addUserMessage(text);
     this.showTyping(true);
-    setTimeout(() => { this.showTyping(false); this.processAI(text); }, 700 + Math.random()*600);
+    setTimeout(() => {
+      this.showTyping(false);
+      try { this.processAI(text); } catch (err) {
+        console.warn('[Chat] processAI:', err);
+        this.addBotMessage('Tuve un problema al procesar tu mensaje. ¿Puedes intentarlo de nuevo?');
+      } finally { this._sending = false; }
+    }, 700 + Math.random() * 600);
   },
   /** Motor de IA — comprensión contextual y respuesta coherente */
   processAI(text) {
@@ -8371,26 +8428,37 @@ const TicketModule = {
     e.preventDefault();
     const editId = document.getElementById('ticketEditId').value;
     const data = {
-      nombre: document.getElementById('tNombre').value,
-      departamento: document.getElementById('tDepto').value,
-      email: document.getElementById('tEmail').value,
+      nombre: sanitizeText(document.getElementById('tNombre').value, 120),
+      departamento: sanitizeText(document.getElementById('tDepto').value, 40),
+      email: sanitizeText(document.getElementById('tEmail').value, 120).toLowerCase(),
       categoria: document.getElementById('tCategoria').value,
       prioridad: document.getElementById('tPrioridad').value,
-      descripcion: document.getElementById('tDescripcion').value,
+      descripcion: sanitizeText(document.getElementById('tDescripcion').value, 4000),
       estado: editId ? document.getElementById('tEstado').value : 'Abierto',
       updatedAt: Date.now()
     };
+    if (!validateRequired(data.nombre, 2)) { toast('Ingresa el nombre del solicitante', 'warning'); return; }
+    if (!validateEmail(data.email)) { toast('Ingresa un correo válido', 'warning'); return; }
+    if (!validateRequired(data.departamento, 1)) { toast('Ingresa el departamento', 'warning'); return; }
+    if (!validateRequired(data.descripcion, 10)) { toast('La descripción debe tener al menos 10 caracteres', 'warning'); return; }
     const submitBtn = document.querySelector('#ticketForm button[type="submit"]');
     if (submitBtn) submitBtn.disabled = true;
     try {
       if (editId) {
         const idx = database.tickets.findIndex(t => t.id === editId);
         if (idx >= 0) {
+          const prev = database.tickets[idx];
           await this.persistPendingFiles(editId);
           const attachments = await TicketAttachmentModule.listMeta(editId);
-          database.tickets[idx] = { ...database.tickets[idx], ...data, attachments };
+          const patch = { ...data, attachments };
+          if (prev.estado !== data.estado) {
+            appendTicketAudit(patch, 'cambio_estado', AuthModule.currentUser, `Estado: ${prev.estado} → ${data.estado}`);
+          } else {
+            appendTicketAudit(patch, 'actualizacion', AuthModule.currentUser, 'Ticket actualizado desde panel');
+          }
+          database.tickets[idx] = { ...prev, ...patch };
           if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled()) {
-            try { await ArturitoCloud.tickets.update(editId, data); } catch (err) { console.warn('[Cloud] ticket update:', err); }
+            try { await ArturitoCloud.tickets.update(editId, { ...data, historial: database.tickets[idx].historial }); } catch (err) { console.warn('[Cloud] ticket update:', err); }
           }
         }
         toast('Ticket actualizado', 'success');
@@ -8412,8 +8480,10 @@ const TicketModule = {
           origen: 'portal',
           ...data,
           attachments: [],
+          historial: [],
           createdAt: Date.now()
         };
+        appendTicketAudit(ticket, 'creacion', { nombre: data.nombre, email: data.email }, `Ticket creado — ${data.categoria} (${data.prioridad})`);
         database.tickets.unshift(ticket);
         const newMetas = await this.persistPendingFiles(newId);
         ticket.attachments = newMetas.length ? await TicketAttachmentModule.listMeta(newId) : [];
@@ -10208,6 +10278,27 @@ function registerArturitoServiceWorker() {
   navigator.serviceWorker.register(URL.createObjectURL(blob), { scope: scope }).catch(function(){});
 }
 
+/* ─── ResilienceModule — errores globales, reconexión ─── */
+const ResilienceModule = {
+  _online: typeof navigator !== 'undefined' ? navigator.onLine : true,
+  init() {
+    window.addEventListener('error', (ev) => {
+      console.warn('[App] error:', ev.message, ev.filename, ev.lineno);
+    });
+    window.addEventListener('unhandledrejection', (ev) => {
+      console.warn('[App] unhandled rejection:', ev.reason);
+    });
+    window.addEventListener('online', () => {
+      this._online = true;
+      if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.store && ArturitoCloud.fb?.isEnabled?.()) {
+        void ArturitoCloud.store.refreshFromCloud(database, (type) => App.applyCloudUpdate(type));
+      }
+    });
+    window.addEventListener('offline', () => { this._online = false; });
+  },
+  isOnline() { return this._online; }
+};
+
 /* ─── App — Orquestador principal ─── */
 const App = {
   mode: 'client',
@@ -10338,6 +10429,7 @@ const App = {
     }
 
     SettingsModule.apply();
+    ResilienceModule.init();
     ArturitoModule.init();
     AuthModule.init();
     GadgetModule.init();
