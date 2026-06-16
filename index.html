@@ -896,8 +896,7 @@ body.mode-client #adminApp{display:none!important}
       <div class="topbar-actions">
         <span id="cloudStatusBadge" class="cloud-badge cloud-off">Conectando…</span>
         <span id="currentUserBadge" style="font-size:.8rem;color:var(--text-muted)"></span>
-        <button class="btn btn-secondary btn-sm" id="btnBackup"><span data-icon="backup" data-icon-size="sm"></span> Backup</button>
-        <button class="btn btn-secondary btn-sm" id="btnRestore"><span data-icon="restore" data-icon-size="sm"></span> Restaurar</button>
+        <button class="btn btn-secondary btn-sm" id="btnBackup"><span data-icon="export" data-icon-size="sm"></span> Exportar JSON</button>
         <input type="file" id="importFile" accept=".json" hidden>
         <button class="btn btn-secondary btn-sm" id="btnImport"><span data-icon="import" data-icon-size="sm"></span> Importar JSON</button>
       </div>
@@ -2261,8 +2260,6 @@ const ARTURITO_GADGET_KB_SEED = [
 
   const FIREBASE_CONFIG_KEY = 'arturito_firebase_config';
   const CLOUD_SYNC_KEY = 'arturito_cloud_sync_v2';
-  const PENDING_SETTINGS_KEY = 'arturito_pending_settings_v1';
-  const PENDING_CLOUD_SYNC_KEY = 'arturito_pending_cloud_sync_v1';
   const LOCAL_DB_KEY = 'arturito_ai_database';
   const FIREBASE_SDK = '10.14.1';
 
@@ -2582,60 +2579,6 @@ const ARTURITO_GADGET_KB_SEED = [
     }
   }
 
-  /* ─── KnowledgeManager ─── */
-  class KnowledgeManager {
-    constructor(fb) {
-      this.fb = fb;
-    }
-
-    async listFAQ() {
-      if (!this.fb.isEnabled()) return [];
-      const { getDocs } = this.fb._modules;
-      const snap = await getDocs(this.fb.col('faq'));
-      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    }
-
-    async listKnowledgeBase() {
-      if (!this.fb.isEnabled()) return [];
-      const { getDocs } = this.fb._modules;
-      const snap = await getDocs(this.fb.col('knowledge_base'));
-      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    }
-
-    async saveFAQ(entry) {
-      const { setDoc, doc } = this.fb._modules;
-      const id = entry.id || `faq_${Date.now()}`;
-      const data = {
-        pregunta: entry.pregunta || entry.question,
-        respuesta: entry.respuesta || entry.answer,
-        categoria: entry.categoria || entry.category || 'General',
-        activa: entry.activa !== false,
-        palabrasClave: entry.palabrasClave || entry.keywords || [],
-        fechaCreacion: entry.fechaCreacion || Date.now()
-      };
-      await setDoc(doc(this.fb.col('faq'), id), data, { merge: true });
-      return { id, ...data };
-    }
-
-    async saveKnowledge(entry) {
-      const { setDoc, doc } = this.fb._modules;
-      const id = entry.id || `kb_${Date.now()}`;
-      const data = {
-        titulo: entry.titulo || entry.title,
-        categoria: entry.categoria || entry.category || 'General',
-        contenido: entry.contenido || entry.content,
-        palabrasClave: entry.palabrasClave || entry.keywords || [],
-        fechaCreacion: entry.fechaCreacion || Date.now()
-      };
-      await setDoc(doc(this.fb.col('knowledge_base'), id), data, { merge: true });
-      return { id, ...data };
-    }
-
-    async deleteCollectionItem(colName, id) {
-      const { deleteDoc, doc } = this.fb._modules;
-      await deleteDoc(doc(this.fb.col(colName), id));
-    }
-  }
 
   /* ─── CloudTicketManager ─── */
   class CloudTicketManager {
@@ -2683,6 +2626,75 @@ const ARTURITO_GADGET_KB_SEED = [
       };
     }
 
+    _todayTicketPrefix() {
+      const d = new Date();
+      const ds = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+      return { ds, prefix: 'TK-' + ds + '-' };
+    }
+
+    _parseTicketSeq(id, prefix) {
+      if (!id || !String(id).startsWith(prefix)) return 0;
+      const m = String(id).match(/-(\d{4})$/);
+      return m ? parseInt(m[1], 10) || 0 : 0;
+    }
+
+    /** Correlativo TK-YYYYMMDD-0001 atómico (sync_meta/ticket_sequence) */
+    async allocateTicketId() {
+      if (!this.fb.isEnabled()) {
+        return global.DatabaseModule?.generateTicketId?.() || ('TK-' + Date.now());
+      }
+      const { runTransaction } = this.fb._modules;
+      const { ds, prefix } = this._todayTicketPrefix();
+      const counterRef = this.fb.doc(`condominios/${this.fb.getCondominioId()}/sync_meta/ticket_sequence`);
+      try {
+        return await runTransaction(this.fb.db, async (transaction) => {
+          const snap = await transaction.get(counterRef);
+          let lastNumber = 0;
+          if (snap.exists()) {
+            const data = snap.data() || {};
+            if (data.date === ds) lastNumber = data.lastNumber || 0;
+          }
+          const next = lastNumber + 1;
+          transaction.set(counterRef, { date: ds, lastNumber: next, updatedAt: Date.now() });
+          return prefix + String(next).padStart(4, '0');
+        });
+      } catch (err) {
+        console.warn('[Cloud] allocateTicketId:', err);
+        return global.DatabaseModule?.generateTicketId?.() || (prefix + '0001');
+      }
+    }
+
+    /** Alinea contador con tickets ya guardados (requiere auth staff) */
+    async syncCounterFromExisting() {
+      if (!this.fb.isEnabled() || !this.fb.auth?.currentUser) return;
+      const { getDocs, runTransaction } = this.fb._modules;
+      const { ds, prefix } = this._todayTicketPrefix();
+      let maxNum = 0;
+      try {
+        const snap = await getDocs(this.fb.col('tickets'));
+        snap.docs.forEach((docSnap) => {
+          const id = docSnap.id || docSnap.data()?.numeroTicket;
+          maxNum = Math.max(maxNum, this._parseTicketSeq(id, prefix));
+        });
+      } catch (err) {
+        console.warn('[Cloud] syncCounterFromExisting read:', err);
+        return;
+      }
+      if (maxNum === 0) return;
+      const counterRef = this.fb.doc(`condominios/${this.fb.getCondominioId()}/sync_meta/ticket_sequence`);
+      try {
+        await runTransaction(this.fb.db, async (transaction) => {
+          const snap = await transaction.get(counterRef);
+          const data = snap.exists() ? (snap.data() || {}) : {};
+          let lastNumber = data.date === ds ? (data.lastNumber || 0) : 0;
+          if (maxNum <= lastNumber) return;
+          transaction.set(counterRef, { date: ds, lastNumber: maxNum, updatedAt: Date.now() });
+        });
+      } catch (err) {
+        console.warn('[Cloud] syncCounterFromExisting write:', err);
+      }
+    }
+
     async create(ticket, files = []) {
       const { setDoc, doc } = this.fb._modules;
       const id = ticket.id || ticket.numeroTicket;
@@ -2700,13 +2712,17 @@ const ARTURITO_GADGET_KB_SEED = [
       }
 
       await setDoc(doc(this.fb.col('tickets'), id), data);
-      if (this.notifications) {
-        await this.notifications.push({
-          titulo: 'Nuevo ticket',
-          mensaje: `${id} — ${data.categoria}`,
-          tipo: 'ticket_created',
-          ticketId: id
-        });
+      if (this.notifications && this.fb.auth?.currentUser) {
+        try {
+          await this.notifications.push({
+            titulo: 'Nuevo ticket',
+            mensaje: `${id} — ${data.categoria}`,
+            tipo: 'ticket_created',
+            ticketId: id
+          });
+        } catch (err) {
+          console.warn('[Cloud] ticket notification:', err);
+        }
       }
       return this.mapToLocal(data, id);
     }
@@ -2755,55 +2771,6 @@ const ARTURITO_GADGET_KB_SEED = [
     }
   }
 
-  /* ─── TrainingManagerFB ─── */
-  class TrainingManagerFB {
-    constructor(fb, storage) {
-      this.fb = fb;
-      this.storage = storage;
-    }
-
-    async saveDocument({ id, nombreArchivo, tipo, contenidoExtraido, keywords = [] }) {
-      const { setDoc, doc } = this.fb._modules;
-      const docId = id || `doc_${Date.now()}`;
-      const data = {
-        nombreArchivo,
-        tipo,
-        contenidoExtraido,
-        keywords,
-        fechaCarga: Date.now()
-      };
-      await setDoc(doc(this.fb.col('training_documents'), docId), data, { merge: true });
-      return { id: docId, ...data };
-    }
-
-    async uploadAndExtract(file, extractFn) {
-      const contenidoExtraido = extractFn ? await extractFn(file) : '';
-      const path = this.storage.pathTraining(this.fb.getCondominioId(), `doc_${Date.now()}`, file.name);
-      const meta = await this.storage.upload(file, path);
-      return this.saveDocument({
-        nombreArchivo: file.name,
-        tipo: file.type,
-        contenidoExtraido,
-        keywords: TrainingManagerFB.extractKeywords(contenidoExtraido)
-      });
-    }
-
-    static extractKeywords(text, max = 12) {
-      const words = String(text || '').toLowerCase()
-        .replace(/[^\wáéíóúñ\s]/gi, ' ')
-        .split(/\s+/)
-        .filter((w) => w.length > 4);
-      const freq = {};
-      words.forEach((w) => { freq[w] = (freq[w] || 0) + 1; });
-      return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, max).map(([w]) => w);
-    }
-
-    async listDocuments() {
-      const { getDocs } = this.fb._modules;
-      const snap = await getDocs(this.fb.col('training_documents'));
-      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    }
-  }
 
   /* ─── NotificationManager ─── */
   class NotificationManager {
@@ -2828,23 +2795,6 @@ const ARTURITO_GADGET_KB_SEED = [
       });
     }
 
-    watch(callback) {
-      if (!this.fb.isEnabled()) return () => {};
-      const { query, where, orderBy, limit } = this.fb._modules;
-      const uid = this.auth.currentUser?.uid;
-      const q = uid
-        ? query(this.fb.col('notifications'), where('usuarioDestino', 'in', [uid, 'staff']), orderBy('fecha', 'desc'), limit(50))
-        : query(this.fb.col('notifications'), orderBy('fecha', 'desc'), limit(50));
-      return this.fb.onSnapshot(q, (snap) => {
-        this.items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        callback(this.items);
-      }, () => callback([]));
-    }
-
-    async markRead(id) {
-      const { updateDoc, doc } = this.fb._modules;
-      await updateDoc(doc(this.fb.col('notifications'), id), { leida: true });
-    }
   }
 
   /* ─── DashboardManager ─── */
@@ -2893,97 +2843,6 @@ const ARTURITO_GADGET_KB_SEED = [
     }
   }
 
-  /* ─── ChatbotManager ─── */
-  class ChatbotManager {
-    constructor(knowledge, tickets) {
-      this.knowledge = knowledge;
-      this.tickets = tickets;
-      this.lastConfidence = 0;
-    }
-
-    /** Busca en FAQ de Firestore + local */
-    async buscarFAQ(query, localSearchFn) {
-      let results = [];
-      if (localSearchFn) results = localSearchFn(query) || [];
-      if (this.knowledge?.fb?.isEnabled()) {
-        try {
-          const faqs = await this.knowledge.listFAQ();
-          const q = query.toLowerCase();
-          faqs.filter((f) => f.activa !== false).forEach((f) => {
-            const score = (f.pregunta || '').toLowerCase().includes(q) ? 0.9
-              : (f.respuesta || '').toLowerCase().includes(q) ? 0.75 : 0;
-            if (score) results.push({ source: 'faq', score, title: f.pregunta, content: f.respuesta });
-          });
-        } catch (_) {}
-      }
-      return results.sort((a, b) => b.score - a.score);
-    }
-
-    buscarKnowledgeBase(query, localRetrieveFn) {
-      return localRetrieveFn ? localRetrieveFn(query) : null;
-    }
-
-    async buscarDocumentos(query, ragSearchFn) {
-      if (ragSearchFn) return ragSearchFn(query, 5);
-      if (!this.knowledge?.fb?.isEnabled()) return [];
-      const docs = await this.knowledge.listKnowledgeBase();
-      const q = query.toLowerCase();
-      return docs.filter((d) => (d.contenido || '').toLowerCase().includes(q))
-        .map((d) => ({ source: 'document', score: 0.6, title: d.titulo, content: d.contenido }));
-    }
-
-    buscarTickets(query, localTickets) {
-      const t = localTickets || [];
-      const q = query.toLowerCase();
-      return t.filter((x) =>
-        (x.id || '').toLowerCase().includes(q) ||
-        (x.descripcion || '').toLowerCase().includes(q) ||
-        (x.departamento || '').toLowerCase().includes(q)
-      );
-    }
-
-    computeConfidence(match) {
-      if (!match) return 0;
-      const score = match.score ?? match.confidence ?? 0;
-      this.lastConfidence = Math.min(100, Math.round((score / 0.45) * 100));
-      return this.lastConfidence;
-    }
-
-    formatConfidenceLabel(confidence) {
-      return `Confianza: ${confidence}%`;
-    }
-
-    shouldEscalate(confidence) {
-      return confidence < CONFIDENCE_THRESHOLD * 100;
-    }
-
-    async respond(query, context = {}) {
-      const { localRetrieve, ragSearch, faqSearch, tickets, compose, onLowConfidence } = context;
-      let match = this.buscarKnowledgeBase(query, localRetrieve);
-      if (!match || (match.score || 0) < 0.25) {
-        const faqs = await this.buscarFAQ(query, faqSearch);
-        if (faqs[0]) match = faqs[0];
-      }
-      if (!match || (match.score || 0) < 0.2) {
-        const docs = await this.buscarDocumentos(query, ragSearch);
-        if (docs[0]) match = docs[0];
-      }
-      const confidence = this.computeConfidence(match);
-      const body = match && compose ? compose(query, match) : null;
-
-      if (this.shouldEscalate(confidence) && onLowConfidence) {
-        await onLowConfidence({ query, confidence, match });
-      }
-
-      return {
-        body,
-        confidence,
-        confidenceLabel: this.formatConfidenceLabel(confidence),
-        match,
-        escalate: this.shouldEscalate(confidence)
-      };
-    }
-  }
 
   /* ─── CloudSyncBridge — local ↔ nube unificado ─── */
   const CLOUD_SETTINGS_KEYS = [
@@ -2994,11 +2853,10 @@ const ARTURITO_GADGET_KB_SEED = [
   ];
 
   class CloudSyncBridge {
-    constructor(fb, auth, tickets, knowledge) {
+    constructor(fb, auth, tickets) {
       this.fb = fb;
       this.auth = auth;
       this.tickets = tickets;
-      this.knowledge = knowledge;
       this._unsubs = [];
       this._ticketsUnsub = null;
       this._liveDb = null;
@@ -3195,21 +3053,6 @@ const ARTURITO_GADGET_KB_SEED = [
       }
     }
 
-    async getCloudCounts() {
-      const { getDocs } = this.fb._modules;
-      const [gadget, manual] = await Promise.all([
-        getDocs(this.fb.col('gadget_kb')),
-        getDocs(this.fb.col('knowledge_base'))
-      ]);
-      let tickets = 0;
-      if (this.fb.auth?.currentUser) {
-        try {
-          const t = await getDocs(this.fb.col('tickets'));
-          tickets = t.size;
-        } catch (_) {}
-      }
-      return { gadgetKB: gadget.size, manualKB: manual.size, tickets };
-    }
 
     async ensureCondominioDoc(name) {
       const { setDoc, getDoc } = this.fb._modules;
@@ -3309,7 +3152,6 @@ const ARTURITO_GADGET_KB_SEED = [
       database.chatInteractions = remote;
       database.settings = database.settings || {};
       database.settings.chatAnalytics = this.rebuildChatAnalyticsSummary(remote);
-      this._cacheLocal(database);
       return true;
     }
 
@@ -3329,7 +3171,6 @@ const ARTURITO_GADGET_KB_SEED = [
           const prevFp = this.settingsFingerprint(database.settings);
           database.settings = this.applyRemoteSettings(database.settings, settingsSnap.data());
           if (this.settingsFingerprint(database.settings) !== prevFp) changes.settings = true;
-          this._cacheLocal(database);
         }
 
         let gadgetSnap;
@@ -3364,7 +3205,6 @@ const ARTURITO_GADGET_KB_SEED = [
         }
         if (changes.gadgetKB || changes.knowledge || settingsSnap?.exists()) {
           this.applyUnifiedKnowledge(database);
-          this._cacheLocal(database);
         }
         if (await this.pullChatInteractions(database, forceServer)) changes.analytics = true;
       } catch (err) {
@@ -3407,13 +3247,6 @@ const ARTURITO_GADGET_KB_SEED = [
       return JSON.parse(JSON.stringify(payload));
     }
 
-    mergeCloudSettings(local, remote) {
-      return this.applyRemoteSettings(local, remote);
-    }
-
-    queuePendingSettings() { /* sync público — ya no requiere cola por auth */ }
-
-    async flushPendingSettings() { return false; }
 
     /**
      * Sube temas Gadget a Firestore.
@@ -3513,6 +3346,7 @@ const ARTURITO_GADGET_KB_SEED = [
 
       if (this.fb.auth?.currentUser) {
         await this.batchWrite('tickets', (database.tickets || []).slice(0, 500), (t) => this.tickets.mapFromLocal(t), (t) => t.id);
+        await this.tickets.syncCounterFromExisting();
       }
 
       if (global.IDBModule?.documentsCache?.length) {
@@ -3545,12 +3379,15 @@ const ARTURITO_GADGET_KB_SEED = [
       this.stopTicketsWatch();
       if (!this.fb.isEnabled() || !this.fb.auth?.currentUser) return;
 
+      void this.tickets.syncCounterFromExisting();
+
       const { onSnapshot } = this.fb._modules;
       this._ticketsUnsub = onSnapshot(
         this.fb.col('tickets'),
         (snap) => {
-          database.tickets = snap.docs.map((d) => this.tickets.mapToLocal(d.data(), d.id));
-          this._cacheLocal(database);
+          database.tickets = snap.docs
+            .map((d) => this.tickets.mapToLocal(d.data(), d.id))
+            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
           if (onUpdate) onUpdate('tickets');
         },
         this._snapErr('tickets')
@@ -3573,7 +3410,6 @@ const ARTURITO_GADGET_KB_SEED = [
           const prevFp = this.settingsFingerprint(database.settings);
           database.settings = this.applyRemoteSettings(database.settings, snap.data());
           if (this.settingsFingerprint(database.settings) === prevFp) return;
-          this._cacheLocal(database);
           if (onUpdate) onUpdate('settings');
         },
         this._snapErr('settings')
@@ -3593,7 +3429,6 @@ const ARTURITO_GADGET_KB_SEED = [
           this._syncing = true;
           database.gadgetKB = merged;
           this.applyUnifiedKnowledge(database);
-          this._cacheLocal(database);
           this._syncing = false;
           if (onUpdate) onUpdate('gadgetKB');
         },
@@ -3613,7 +3448,6 @@ const ARTURITO_GADGET_KB_SEED = [
           this._syncing = true;
           database.manualKnowledge = merged;
           this.applyUnifiedKnowledge(database);
-          this._cacheLocal(database);
           this._syncing = false;
           if (onUpdate) onUpdate('knowledge');
         },
@@ -3632,7 +3466,6 @@ const ARTURITO_GADGET_KB_SEED = [
           database.chatInteractions = remote;
           database.settings = database.settings || {};
           database.settings.chatAnalytics = this.rebuildChatAnalyticsSummary(remote);
-          this._cacheLocal(database);
           if (onUpdate) onUpdate('analytics');
         },
         this._snapErr('chat_interactions')
@@ -3642,7 +3475,6 @@ const ARTURITO_GADGET_KB_SEED = [
       this.bindTicketsWatch(database, onUpdate);
     }
 
-    _cacheLocal(_database) { /* cloud-only: sin persistencia local */ }
 
     stop() {
       this.stopTicketsWatch();
@@ -3670,8 +3502,6 @@ const ARTURITO_GADGET_KB_SEED = [
       }
     }
 
-    /** Cloud-only: sin cola ni caché local */
-    async flushPendingCloud() {}
 
     /** Persiste en Firestore según scope; scope 'local' = solo memoria de sesión (chat, UI) */
     async persist(database, scope = 'local', options = {}) {
@@ -3910,13 +3740,10 @@ const ARTURITO_GADGET_KB_SEED = [
   const fb = FirebaseManager.getInstance();
   const auth = new AuthManager(fb);
   const storage = new StorageManager(fb);
-  const knowledge = new KnowledgeManager(fb);
   const notifications = new NotificationManager(fb, auth);
   const tickets = new CloudTicketManager(fb, storage, notifications);
-  const training = new TrainingManagerFB(fb, storage);
-  const sync = new CloudSyncBridge(fb, auth, tickets, knowledge);
+  const sync = new CloudSyncBridge(fb, auth, tickets);
   const store = new UnifiedDataStore(fb, sync);
-  const chatbot = new ChatbotManager(knowledge, tickets);
 
   global.ArturitoCloud = {
     ROLES,
@@ -3927,13 +3754,10 @@ const ARTURITO_GADGET_KB_SEED = [
     fb,
     auth,
     storage,
-    knowledge,
     notifications,
     tickets,
-    training,
     sync,
     store,
-    chatbot,
     DashboardManager,
     UIManager,
     async init(options = {}) {
@@ -3946,7 +3770,6 @@ const ARTURITO_GADGET_KB_SEED = [
         await auth.init(async (user) => {
           if (options.onAuthChange) options.onAuthChange(user);
           if (options.database) {
-            await store.sync.flushPendingSettings(options.database);
             sync.bindTicketsWatch(options.database, sync._liveOnUpdate);
           }
         });
@@ -3969,16 +3792,11 @@ const ARTURITO_GADGET_KB_SEED = [
 <script>
 /* ═══════════════════════════════════════════════════════════════
    ARTURITO AI — Aplicación Monolítica
-   Local + Firebase Cloud (Firestore, Auth, Storage)
+   Monolito — Firebase Cloud (Firestore, Auth, Storage)
    ═══════════════════════════════════════════════════════════════ */
 
 const STORAGE_KEY = 'arturito_ai_database';
 const BACKUP_PREFIX = 'arturito_ai_backup_';
-const DB_VERSION_KEY = 'arturito_ai_db_version';
-const DB_VERSION = 3;
-const PILOT_USER_IDS = ['u1', 'u2', 'u3'];
-const PILOT_KNOWLEDGE_IDS = ['k1', 'k2', 'k3', 'k4'];
-const PILOT_EMAILS = ['maria@email.cl', 'carlos@email.cl', 'ana@email.cl', 'conserje@edificio.cl'];
 const CATEGORIES = ['Mantención','Postventa','Seguridad','Conserjería','Mudanzas','Gastos Comunes','Reclamos','Emergencias'];
 const STATUSES = ['Abierto','En Revisión','Asignado','En Proceso','Resuelto','Cerrado'];
 const PRIORITIES = ['Baja','Media','Alta','Crítica'];
@@ -4076,9 +3894,6 @@ const IconSVG = {
   }
 };
 function icon(name, size = 'sm') { return IconSVG.html(name, size); }
-function iconBtn(name, title = '', extraClass = '') {
-  return `<button type="button" class="btn btn-secondary btn-sm btn-icon${extraClass ? ' ' + extraClass : ''}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${icon(name, 'sm')}</button>`;
-}
 function actionBtn(name, onclick, title, danger = false) {
   const cls = danger ? 'btn btn-danger btn-sm btn-icon' : 'btn btn-secondary btn-sm btn-icon';
   return `<button type="button" class="${cls}" onclick="${onclick}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${icon(name, 'sm')}</button>`;
@@ -4145,8 +3960,6 @@ const ARTURITO_SVG = `<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.
 /** Base de datos en memoria — la nube (Firestore) es la fuente de verdad */
 let database = { users: [], tickets: [], knowledge: [], gadgetKB: [], conversations: [], chatInteractions: [], settings: {} };
 let currentConversationId = null;
-let sortState = { field: 'createdAt', dir: -1 };
-
 /* ─── DatabaseModule ─── */
 const DatabaseModule = {
   /** Inicializa estructura en memoria; la nube (Firestore) es la única fuente de verdad */
@@ -4154,8 +3967,7 @@ const DatabaseModule = {
     this.seed();
     this.ensureDefaults({ skipGadgetSeed: true });
     this.clearLegacyLocalStorage();
-    const purged = this.purgePilotData();
-    return { purged, repaired: false };
+    return { purged: false, repaired: false };
   },
   /** Elimina cachés locales obsoletos — la app no persiste datos fuera de Firestore */
   clearLegacyLocalStorage() {
@@ -4173,14 +3985,6 @@ const DatabaseModule = {
     database.gadgetKB = JSON.parse(JSON.stringify(ARTURITO_GADGET_KB_SEED)).map(e => ({ ...e, createdAt: Date.now() }));
     if (typeof KnowledgeBaseModule !== 'undefined') KnowledgeBaseModule.syncFromGadget();
     return true;
-  },
-  /**
-   * Restaura la base Gadget si quedó vacía tras fallo de nube (no empuja a Firestore solo).
-   */
-  repairKnowledgeIfEmpty() {
-    if (typeof ARTURITO_GADGET_KB_SEED === 'undefined') return false;
-    if (database.gadgetKB?.length) return false;
-    return this.seedGadgetTemplate();
   },
   /** Crea estructura inicial limpia (sin datos piloto) */
   seed() {
@@ -4207,36 +4011,6 @@ const DatabaseModule = {
         theme: 'light'
       }
     };
-  },
-  /** Elimina datos de prueba piloto de instalaciones anteriores */
-  purgePilotData() {
-    const v = parseInt(localStorage.getItem(DB_VERSION_KEY) || '1', 10);
-    if (v >= DB_VERSION) return false;
-    if (database.users) {
-      database.users = database.users.filter(u =>
-        !PILOT_USER_IDS.includes(u.id) && !PILOT_EMAILS.includes(u.email)
-      );
-    }
-    if (!database.users.some(u => u.rol === 'Administrador')) {
-      database.users.push({
-        id: 'u_admin', nombre: 'Administrador', email: 'admin@edificio.cl',
-        rol: 'Administrador', departamento: 'Administración', createdAt: Date.now()
-      });
-    }
-    database.tickets = [];
-    database.conversations = [];
-    if (database.knowledge) {
-      database.knowledge = database.knowledge.filter(k =>
-        !PILOT_KNOWLEDGE_IDS.includes(k.id) && k.origin !== 'gadget'
-      );
-    }
-    if (database.manualKnowledge) {
-      database.manualKnowledge = database.manualKnowledge.filter(k => !PILOT_KNOWLEDGE_IDS.includes(k.id));
-    }
-    if (typeof KnowledgeBaseModule !== 'undefined') KnowledgeBaseModule.syncFromGadget();
-    Object.keys(localStorage).filter(k => k.startsWith(BACKUP_PREFIX)).forEach(k => localStorage.removeItem(k));
-    localStorage.setItem(DB_VERSION_KEY, String(DB_VERSION));
-    return true;
   },
   /** Asegura que existan configuraciones y contadores */
   ensureDefaults(opts = {}) {
@@ -4305,17 +4079,19 @@ const DatabaseModule = {
   },
   /** Genera ID único */
   uid(prefix = 'id') { return prefix + '_' + Date.now() + '_' + Math.random().toString(36).substr(2,5); },
-  /** Genera código de ticket TK-YYYYMMDD-0001 */
+  /** Genera código de ticket TK-YYYYMMDD-0001 (respaldo local si la nube no responde) */
   generateTicketId() {
     const d = new Date();
     const ds = d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
     const prefix = 'TK-' + ds + '-';
-    const today = database.tickets.filter(t => t.id.startsWith(prefix));
-    const num = String(today.length + 1).padStart(4,'0');
-    return prefix + num;
+    const today = (database.tickets || []).filter(t => t.id && String(t.id).startsWith(prefix));
+    let maxNum = 0;
+    today.forEach(t => {
+      const m = String(t.id).match(/-(\d{4})$/);
+      if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10) || 0);
+    });
+    return prefix + String(maxNum + 1).padStart(4,'0');
   },
-  /** Cloud-only: sin respaldos locales automáticos */
-  autoBackup() {},
   /** Exporta base completa como JSON */
   exportJSON() {
     const blob = new Blob([JSON.stringify(database, null, 2)], { type: 'application/json' });
@@ -4334,11 +4110,6 @@ const DatabaseModule = {
     }
     return false;
   },
-  /** Cloud-only: restauración solo desde exportación JSON manual */
-  restoreLatest() {
-    toast('No hay respaldos locales. Usa exportar/importar JSON o recupera desde Firestore.', 'info');
-    return false;
-  }
 };
 window.DatabaseModule = DatabaseModule;
 
@@ -5331,25 +5102,6 @@ const RAGModule = {
     return out.endsWith('.') || out.endsWith('!') || out.endsWith('?') ? out : out + '.';
   },
 
-  /** @deprecated — usar synthesizeCoherentAnswer vía ResponseEngine */
-  synthesizeAnswer(query, results) {
-    return this.synthesizeCoherentAnswer(query, results);
-  },
-
-  /** Consulta principal — busca y genera respuesta con nivel de confianza */
-  query(text) {
-    const results = this.search(text, 5);
-    if (!results.length || results[0].score < 0.08) return null;
-    const confidence = results[0].score;
-    return {
-      answer: this.synthesizeCoherentAnswer(text, results),
-      results,
-      top: results[0],
-      confidence,
-      lowConfidence: confidence < 0.2,
-      normalizedScore: Math.min(1, confidence / 0.45)
-    };
-  },
 
   /** Obtiene temas de un documento */
   getTopicsByDoc(docId) {
@@ -6021,7 +5773,6 @@ const AuthModule = {
       try {
         const user = await ArturitoCloud.auth.login(email, pass);
         this.currentUser = user;
-        await ArturitoCloud.sync.flushPendingSettings(database);
         await DatabaseModule.save('full', { fullSync: true });
         this.hideLogin();
         App.setMode('admin');
@@ -7872,17 +7623,31 @@ const TicketModule = {
         }
         toast('Ticket actualizado', 'success');
       } else {
-        const newId = DatabaseModule.generateTicketId();
+        let newId = DatabaseModule.generateTicketId();
+        if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.tickets?.allocateTicketId) {
+          newId = await ArturitoCloud.tickets.allocateTicketId();
+        }
         const ticket = { id: newId, ...data, attachments: [], createdAt: Date.now() };
-        database.tickets.unshift(ticket);
-        const newMetas = await this.persistPendingFiles(newId);
-        ticket.attachments = newMetas.length ? await TicketAttachmentModule.listMeta(newId) : [];
+        let cloudSaved = false;
         if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.fb?.isEnabled()) {
           try {
-            await ArturitoCloud.tickets.create(ticket, this._pendingFiles.slice());
+            const saved = await ArturitoCloud.tickets.create(ticket, this._pendingFiles.slice());
+            if (saved?.attachments?.length) ticket.attachments = saved.attachments;
+            this._pendingFiles = [];
+            cloudSaved = true;
           } catch (err) {
             console.warn('[Cloud] ticket create:', err);
+            toast('No se pudo registrar la solicitud en la nube. Revisa tu conexión e intenta de nuevo.', 'error');
+            return;
           }
+        } else {
+          cloudSaved = true;
+        }
+        if (!cloudSaved) return;
+        database.tickets.unshift(ticket);
+        if (!ticket.attachments.length) {
+          const newMetas = await this.persistPendingFiles(newId);
+          ticket.attachments = newMetas.length ? await TicketAttachmentModule.listMeta(newId) : [];
         }
         toast('Ticket creado: ' + newId, 'success');
         if (App.mode === 'client' && ChatModule.getCurrent()) {
@@ -8945,8 +8710,6 @@ const TrainingModule = {
     toast('Conocimiento exportado (Gadget + manual)', 'success');
   }
 };
-const KnowledgeModule = TrainingModule;
-
 /* ─── UserModule ─── */
 const UserModule = {
   /** Inicializa gestión de usuarios */
@@ -9264,11 +9027,7 @@ const NavModule = {
     document.getElementById('mobileMenuBtn').addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
     document.getElementById('sidebarClose').addEventListener('click', () => document.getElementById('sidebar').classList.remove('open'));
     document.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', () => closeModal(btn.dataset.close)));
-    document.getElementById('btnBackup').addEventListener('click', () => { DatabaseModule.autoBackup(); DatabaseModule.exportJSON(); toast('Backup creado y descargado', 'success'); });
-    document.getElementById('btnRestore').addEventListener('click', () => {
-      if (DatabaseModule.restoreLatest()) { App.refresh(); toast('Respaldo restaurado', 'success'); }
-      else toast('No hay respaldos disponibles', 'error');
-    });
+    document.getElementById('btnBackup').addEventListener('click', () => { DatabaseModule.exportJSON(); toast('Datos exportados', 'success'); });
     document.getElementById('btnImport').addEventListener('click', () => document.getElementById('importFile').click());
     document.getElementById('importFile').addEventListener('change', e => {
       const file = e.target.files[0]; if (!file) return;
@@ -9344,11 +9103,13 @@ const App = {
         TrainingModule.renderStats?.();
       }
     }
-    if (this.mode === 'admin') {
-      if (type === 'tickets') {
+    if (type === 'tickets') {
+      if (this.mode === 'admin') {
         TicketModule.render();
         ReportModule.render();
+        AdminModule.render();
       }
+    } else if (this.mode === 'admin') {
       AdminModule.render();
     }
   },
@@ -9452,15 +9213,12 @@ const App = {
     window.TicketModule = TicketModule;
     window.ChatModule = ChatModule;
     window.TrainingModule = TrainingModule;
-    window.KnowledgeModule = TrainingModule;
     window.UserModule = UserModule;
 
     if (AuthModule.checkSession()) this.setMode('admin');
     else this.setMode('client');
 
-    if (boot?.purged) toast('Datos de prueba piloto eliminados', 'info');
-
-    registerArturitoServiceWorker();
+registerArturitoServiceWorker();
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible' || typeof ArturitoCloud === 'undefined' || !ArturitoCloud.store) return;
