@@ -1147,7 +1147,7 @@ body.mode-client #adminApp{display:none!important}
             <div class="form-group"><label>Gmail remitente (SMTP)</label><input type="email" id="setSmtpGmail" placeholder="tu@gmail.com" autocomplete="username"></div>
             <div class="form-group"><label>Contraseña de aplicación Google</label><input type="password" id="setSmtpAppPassword" placeholder="16 caracteres sin espacios" autocomplete="new-password"></div>
             <div class="form-group full"><label>O URI SMTP completa (opcional)</label><input type="password" id="setSmtpConnectionUri" autocomplete="off" placeholder="smtps://...@smtp.gmail.com:465"></div>
-            <div class="form-group"><label>Modo de envío</label><select id="setTicketEmailMode"><option value="extension">Trigger Email (recomendado — extensión Firebase)</option><option value="auto">Automático (SMTP panel + Trigger Email)</option><option value="smtp">Solo SMTP del panel</option></select></div>
+            <div class="form-group"><label>Modo de envío</label><select id="setTicketEmailMode"><option value="auto">Automático (SMTP del panel — recomendado)</option><option value="extension">Cola mail/ (processMailQueue)</option><option value="smtp">Solo SMTP del panel</option></select></div>
             <p id="smtpConfigStatus" class="ticket-hint" style="margin:0 0 .5rem"></p>
             <p class="ticket-hint" style="margin:0 0 .75rem">Al crear ticket se escribe en <code>mail/</code>. La Cloud Function <strong>processMailQueue</strong> envía el correo por Gmail SMTP. Configura Gmail abajo o en <code>functions/.env</code> al desplegar.</p>
             <div class="form-group full" style="display:flex;gap:.5rem;flex-wrap:wrap">
@@ -2761,12 +2761,21 @@ const ARTURITO_GADGET_KB_SEED = [
 
       await setDoc(doc(this.fb.col('tickets'), id), data);
       const ticketPath = `condominios/${this.fb.getCondominioId()}/tickets/${id}`;
+      const localTicket = this.mapToLocal(data, id);
+      const hasSmtp = !!String(database.settings?.smtpConnectionUri || '').trim();
       let mailId = null;
-      try {
-        mailId = await global.TicketEmailDebug?.queueMailForTicket?.(id, this.mapToLocal(data, id));
-      } catch (err) {
-        console.warn('[TicketEmail] queue mail/ desde app:', err);
-        global.toast?.('Ticket guardado. Falta publicar reglas mail/ → bash deploy-firebase.sh', 'warning');
+      if (!hasSmtp) {
+        try {
+          mailId = await global.TicketEmailDebug?.queueMailForTicket?.(id, localTicket);
+        } catch (err) {
+          console.warn('[TicketEmail] queue mail/ desde app:', err);
+          global.toast?.('Ticket guardado. Falta publicar reglas mail/ → bash deploy-firebase.sh', 'warning');
+        }
+      } else {
+        global.TicketEmailDebug?.log('SMTP en settings — notifyAdminOnTicket envía directo (despliega functions si no llega el correo)', {
+          ticketId: id,
+          to: database.settings?.notifyAdminEmail
+        });
       }
       console.log('[TicketEmail] Ticket en Firestore', {
         ticketId: id,
@@ -7717,13 +7726,13 @@ const TicketEmailDebug = {
     const uri = database.settings?.smtpConnectionUri || '';
     const mode = database.settings?.ticketEmailMode || 'extension';
     if (mode === 'extension') {
-      el.innerHTML = '<strong style="color:var(--primary)">✓ Modo Trigger Email</strong> — la Cloud Function encola en <code>mail/</code> y la extensión envía (SMTP en extensión Firebase).';
+      el.innerHTML = '<strong style="color:var(--primary)">✓ Modo cola mail/</strong> — la app escribe en <code>mail/</code> y <strong>processMailQueue</strong> envía por SMTP.';
       return;
     }
     if (uri) {
-      el.innerHTML = '<strong style="color:var(--primary)">✓ SMTP guardado en Firestore</strong> — envío directo desde Cloud Function.';
+      el.innerHTML = '<strong style="color:var(--primary)">✓ SMTP guardado en Firestore</strong> — <strong>notifyAdminOnTicket</strong> envía al crear el ticket (despliega functions).';
     } else {
-      el.innerHTML = '<strong style="color:#dc2626">⚠ Sin SMTP en panel</strong> — modo Automático usará Trigger Email como respaldo. O configura Gmail abajo.';
+      el.innerHTML = '<strong style="color:#dc2626">⚠ Sin SMTP en panel</strong> — modo Automático encolará en mail/. Configura Gmail abajo o despliega functions/.env.';
     }
   },
   _maskUri(uri) {
@@ -7764,7 +7773,7 @@ const TicketEmailDebug = {
     const modeEl = document.getElementById('setTicketEmailMode');
     if (modeEl) modeEl.value = 'extension';
     this.updateSmtpStatusIndicator();
-    this.log('Modo ajustado en Firestore', '→ extension (Trigger Email en artutitohipodromo02)');
+    this.log('Modo ajustado en Firestore', '→ extension (cola mail/ + processMailQueue)');
     return true;
   },
   async audit(label = 'Auditoría') {
@@ -7796,7 +7805,10 @@ const TicketEmailDebug = {
         issues.push('Modo Solo SMTP pero falta smtpConnectionUri → Gmail + contraseña de app → Guardar');
       }
       if ((mode === 'extension' || (mode === 'auto' && !hasSmtp))) {
-        this.log('Envío vía Trigger Email', 'Function escribe en mail/ → extensión firestore-send-email (base artutitohipodromo02). Verifica SMTP en Extensions.');
+        this.log('Envío vía mail/', 'processMailQueue (Cloud Function) lee SMTP de settings/main o functions/.env');
+      }
+      if (mode === 'auto' && hasSmtp) {
+        this.log('Envío vía SMTP directo', 'notifyAdminOnTicket al crear ticket (requiere: firebase deploy --only functions)');
       }
       this.log('Config Firestore (settings/main)', {
         database: ArturitoCloud.fb?.getFirestoreDatabaseId?.() || 'artutitohipodromo02',
@@ -7816,7 +7828,9 @@ const TicketEmailDebug = {
       if (issues.length) {
         issues.forEach((i) => this.warn('Problema detectado', i));
       } else {
-        this.log('Checklist OK', 'Al crear ticket la app escribe en mail/ → extensión Trigger Email envía. Revisa mail/ en Firestore y campo delivery.');
+        this.log('Checklist OK', hasSmtp
+          ? 'SMTP configurado → despliega functions y crea ticket. Revisa logs notifyAdminOnTicket.'
+          : 'Sin SMTP → mail/ + processMailQueue. Despliega: firebase deploy --only functions');
       }
       return { ok: issues.length === 0, issues, settings: s };
     } catch (err) {
@@ -7916,13 +7930,13 @@ const TicketEmailDebug = {
     void this.watchMailDelivery(docRef.id);
     return docRef.id;
   },
-  /** Espera el campo delivery que escribe la extensión Trigger Email (diagnóstico SMTP) */
+  /** Espera el campo delivery que escribe processMailQueue (Cloud Function) */
   async watchMailDelivery(mailId, maxAttempts = 15) {
     if (!mailId || typeof ArturitoCloud === 'undefined' || !ArturitoCloud.fb?.isEnabled()) return;
     const { doc, getDoc } = ArturitoCloud.fb._modules;
     const ref = doc(ArturitoCloud.fb.db, 'mail', mailId);
     const dbId = ArturitoCloud.fb.getFirestoreDatabaseId?.() || 'artutitohipodromo02';
-    this.log('Esperando extensión Trigger Email…', { mailId, database: dbId });
+    this.log('Esperando processMailQueue (Cloud Function)…', { mailId, database: dbId });
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((r) => setTimeout(r, 2000));
       try {
@@ -7932,16 +7946,16 @@ const TicketEmailDebug = {
         const delivery = data.delivery;
         if (!delivery) continue;
         if (delivery.state === 'SUCCESS' || delivery.state === 'DELIVERED') {
-          this.log('✓ Correo enviado por extensión', { mailId, delivery });
+          this.log('✓ Correo enviado', { mailId, processedBy: delivery.processedBy || 'processMailQueue', delivery });
           return { ok: true, delivery };
         }
         if (delivery.state === 'ERROR' || delivery.state === 'FAILED' || delivery.error) {
-          this.warn('✗ Extensión no pudo enviar el correo', {
+          this.warn('✗ No se pudo enviar el correo', {
             mailId,
             state: delivery.state,
             error: delivery.error || delivery.info || delivery
           });
-          this.warn('Solución', 'Firebase Console → Extensions → Trigger Email → Reconfigure. SMTP Gmail + contraseña de app. DATABASE=artutitohipodromo02.');
+          this.warn('Solución', 'firebase deploy --only functions --project chatbots-hipodromo. Revisa SMTP en settings/main o functions/.env');
           return { ok: false, delivery };
         }
         if (delivery.state === 'PENDING' || delivery.state === 'PROCESSING') continue;
@@ -7966,21 +7980,23 @@ const TicketEmailDebug = {
       path: `mail/${mailId}`,
       database: dbId,
       causas: [
-        'Extensión Trigger Email: SMTP incorrecto o base distinta de artutitohipodromo02',
-        'Extensions → Trigger Email → Logs',
-        'Abre el doc mail/ en consola y mira si existe delivery.error'
+        'Cloud Function processMailQueue no desplegada o falló al arrancar',
+        'Firebase Console → Functions → processMailQueue → Logs',
+        'Abre mail/' + mailId + ' y mira delivery.error; SMTP en settings/main'
       ]
     });
     return { ok: false, timeout: true };
   },
   async afterTicketCreated(ticketId, ticket) {
-    this.log('✓ Ticket creado — correo encolado en mail/ para Trigger Email', {
+    const hasSmtp = !!String(database.settings?.smtpConnectionUri || '').trim();
+    this.log(hasSmtp ? '✓ Ticket creado — envío SMTP vía Cloud Function' : '✓ Ticket creado — correo en mail/', {
       ticketId,
       firestorePath: typeof ArturitoCloud !== 'undefined'
         ? `condominios/${ArturitoCloud.fb.getCondominioId()}/tickets/${ticketId}`
         : ticketId,
       solicitante: ticket?.email,
-      categoria: ticket?.categoria
+      categoria: ticket?.categoria,
+      deploy: hasSmtp ? 'firebase deploy --only functions --project chatbots-hipodromo' : 'mail/ + processMailQueue'
     });
     await this.audit('Post-creación ticket');
   }
