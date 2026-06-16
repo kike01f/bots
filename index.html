@@ -2877,6 +2877,41 @@ const ARTURITO_GADGET_KB_SEED = [
         callback(tickets);
       });
     }
+
+    _callable(name) {
+      if (!this.fb.functions) throw new Error('Cloud Functions no inicializadas');
+      const { httpsCallable } = this.fb._modules;
+      return httpsCallable(this.fb.functions, name);
+    }
+
+    /** Obtiene siguiente TK-000001 desde Firestore (correlativo único en nube) */
+    async allocateNumber() {
+      if (!this.fb.isEnabled()) {
+        return DatabaseModule.generateTicketIdFallback();
+      }
+      try {
+        const fn = this._callable('allocateTicketNumber');
+        const res = await fn({ condominioId: this.fb.getCondominioId() });
+        return res.data?.numeroTicket || res.data?.numero;
+      } catch (err) {
+        console.warn('[CloudTicket] allocateNumber:', err);
+        throw new Error('No se pudo generar número de ticket. Verifica Cloud Functions desplegadas.');
+      }
+    }
+
+    /** Sincroniza contador con tickets existentes (una vez por sesión admin) */
+    _counterSynced = false;
+    async syncCounterIfNeeded(force = false) {
+      if (!this.fb.isEnabled() || !this.fb.auth?.currentUser) return;
+      if (this._counterSynced && !force) return;
+      try {
+        const fn = this._callable('syncTicketCounter');
+        await fn({ condominioId: this.fb.getCondominioId() });
+        this._counterSynced = true;
+      } catch (err) {
+        console.warn('[CloudTicket] syncCounter:', err);
+      }
+    }
   }
 
   /* ─── TrainingManagerFB ─── */
@@ -3766,6 +3801,7 @@ const ARTURITO_GADGET_KB_SEED = [
         (snap) => {
           database.tickets = snap.docs.map((d) => this.tickets.mapToLocal(d.data(), d.id));
           this._cacheLocal(database);
+          void this.tickets.syncCounterIfNeeded();
           if (onUpdate) onUpdate('tickets');
         },
         this._snapErr('tickets')
@@ -4521,17 +4557,27 @@ const DatabaseModule = {
     }
     return { cloud: false, memory: true };
   },
-  /** Genera ID único */
-  uid(prefix = 'id') { return prefix + '_' + Date.now() + '_' + Math.random().toString(36).substr(2,5); },
-  /** Genera código de ticket TK-YYYYMMDD-0001 */
-  generateTicketId() {
-    const d = new Date();
-    const ds = d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
-    const prefix = 'TK-' + ds + '-';
-    const today = database.tickets.filter(t => t.id.startsWith(prefix));
-    const num = String(today.length + 1).padStart(4,'0');
-    return prefix + num;
+  /** Extrae secuencia numérica de TK-000042 o TK-20250613-0003 (legado) */
+  parseTicketSequence(id) {
+    const s = String(id || '').trim();
+    let m = s.match(/^TK-(\d{6})$/i);
+    if (m) return parseInt(m[1], 10);
+    m = s.match(/^TK-\d{8}-(\d+)$/i);
+    if (m) return parseInt(m[1], 10);
+    return 0;
   },
+  /** Reserva local solo si Firebase no está disponible */
+  generateTicketIdFallback() {
+    const max = (database.tickets || []).reduce(
+      (n, t) => Math.max(n, this.parseTicketSequence(t.numeroTicket || t.id)),
+      0
+    );
+    return `TK-${String(max + 1).padStart(6, '0')}`;
+  },
+  generateTicketId() {
+    return this.generateTicketIdFallback();
+  },
+  uid(prefix = 'id') { return prefix + '_' + Date.now() + '_' + Math.random().toString(36).substr(2,5); },
   /** Cloud-only: sin respaldos locales automáticos */
   autoBackup() {},
   /** Exporta base completa como JSON */
@@ -8090,8 +8136,25 @@ const TicketModule = {
         }
         toast('Ticket actualizado', 'success');
       } else {
-        const newId = DatabaseModule.generateTicketId();
-        const ticket = { id: newId, ...data, attachments: [], createdAt: Date.now() };
+        let newId;
+        try {
+          if (typeof ArturitoCloud !== 'undefined' && ArturitoCloud.tickets?.allocateNumber) {
+            newId = await ArturitoCloud.tickets.allocateNumber();
+          } else {
+            newId = DatabaseModule.generateTicketIdFallback();
+          }
+        } catch (err) {
+          toast(err.message || 'No se pudo reservar número de ticket', 'error');
+          return;
+        }
+        const ticket = {
+          id: newId,
+          numeroTicket: newId,
+          origen: 'portal',
+          ...data,
+          attachments: [],
+          createdAt: Date.now()
+        };
         database.tickets.unshift(ticket);
         const newMetas = await this.persistPendingFiles(newId);
         ticket.attachments = newMetas.length ? await TicketAttachmentModule.listMeta(newId) : [];
